@@ -31,72 +31,92 @@ export default function Dashboard() {
 
   const router = useRouter();
 
-  useEffect(() => {
-    const loadData = async () => {
-      setLoading(true);
-      setError(null);
+ useEffect(() => {
+  const loadData = async () => {
+    setLoading(true);
+    setError(null);
 
-      const {
-        data: { user },
-        error: userError
-      } = await supabase.auth.getUser();
-
-      if (userError || !user) {
-        setError('❌ Không xác định được người dùng. Vui lòng đăng nhập lại.');
-        setLoading(false);
-        return;
-      }
-
-      // 🔍 Lấy tên từ bảng profiles
-      const { data: profile, error: profileError } = await supabase
-        .from('profiles')
-        .select('name')
-        .eq('id', user.id)
-        .maybeSingle();
-
-      if (profileError) {
-        console.error('Lỗi lấy profile:', profileError);
-      } else if (profile) {
-        setName(profile.name);
-      }
-
-      // 🔍 Lấy các project từ bảng permissions
-      const { data: permissionsData, error: permissionsError } = await supabase
-        .from('permissions')
-        .select('role, project:projects(id, title, status)')
-        .eq('user_id', user.id);
-
-      if (permissionsError) {
-        console.error('Lỗi khi lấy permissions:', permissionsError);
-        setProjects([]);
-        setRounds([]);
-        setLoading(false);
-        return;
-      }
-
-      const validProjects = (permissionsData || [])
-        .filter(p => p.project !== null)
-        .map(p => ({
-          ...p.project,
-          role: p.role
-        }));
-
-      setProjects(validProjects);
-
-      // 🔍 Lấy rounds từ các project có quyền
-      const allowedProjectIds = validProjects.map(p => p.id);
-      const { data: rnds, error: rndErr } = await supabase
-        .from('rounds')
-        .select('id, project_id, round_number, status, open_at, close_at')
-        .in('project_id', allowedProjectIds);
-
-      if (rndErr) console.error('Lỗi lấy rounds:', rndErr);
-      setRounds(rnds || []);
+    // 🔐 Lấy thông tin người dùng hiện tại
+    const { data: { user }, error: userError } = await supabase.auth.getUser();
+    if (userError || !user) {
+      setError('❌ Không xác định được người dùng. Vui lòng đăng nhập lại.');
       setLoading(false);
-    };
+      return;
+    }
 
-    loadData();
-  }, []);
+    // 📛 Lấy tên từ bảng profiles
+    const { data: profile, error: profileError } = await supabase
+      .from('profiles')
+      .select('name')
+      .eq('id', user.id)
+      .maybeSingle();
+
+    if (profileError) {
+      console.error('Lỗi khi lấy profile:', profileError);
+    } else if (profile) {
+      setName(profile.name);
+    }
+
+    // 🎯 Bước 1: Lấy quyền truy cập (permissions)
+    const { data: permissionsData, error: permissionsError } = await supabase
+      .from('permissions')
+      .select('role, project_id')
+      .eq('user_id', user.id);
+
+    if (permissionsError) {
+      console.error('Lỗi khi lấy permissions:', permissionsError);
+      setProjects([]);
+      setRounds([]);
+      setLoading(false);
+      return;
+    }
+
+    const projectIds = permissionsData?.map(p => p.project_id) || [];
+    if (projectIds.length === 0) {
+      setProjects([]);
+      setRounds([]);
+      setLoading(false);
+      return;
+    }
+
+    // 🎯 Bước 2: Lấy thông tin dự án
+    const { data: projectsData, error: prjErr } = await supabase
+      .from('projects')
+      .select('id, title, status')
+      .in('id', projectIds);
+
+    if (prjErr) {
+      console.error('Lỗi khi lấy projects:', prjErr);
+      setProjects([]);
+      setRounds([]);
+      setLoading(false);
+      return;
+    }
+
+    // 🧠 Ghép role từ permissions vào từng project
+    const validProjects = (projectsData || []).map(proj => {
+      const matched = permissionsData.find(p => p.project_id === proj.id);
+      return { ...proj, role: matched?.role || '' };
+    });
+
+    setProjects(validProjects);
+
+    // 🧪 Bước 3: Lấy danh sách rounds của các dự án đó
+    const { data: rnds, error: rndErr } = await supabase
+      .from('rounds')
+      .select('id, project_id, round_number, status, open_at, close_at')
+      .in('project_id', projectIds);
+
+    if (rndErr) {
+      console.error('Lỗi khi lấy rounds:', rndErr);
+    }
+
+    setRounds(rnds || []);
+    setLoading(false);
+  };
+
+  loadData();
+}, []);
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
