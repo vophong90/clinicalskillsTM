@@ -312,7 +312,7 @@ export default function SurveyPage() {
   </button>
   <button
     className="px-4 py-1 rounded-lg border text-sm font-medium text-indigo-700 border-indigo-200 hover:bg-indigo-50"
-    disabled={currentIndex === items.length - 1}
+    disabled={curIndex === items.length - 1}
     onClick={goNext}
   >
     Tiếp tục
