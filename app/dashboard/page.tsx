@@ -39,6 +39,7 @@ useEffect(() => {
 
     // 1️⃣ Lấy user từ Supabase Auth
     const { data: { user }, error: userError } = await supabase.auth.getUser();
+    console.log("🔹 [AUTH USER]", user, userError);
 
     if (userError || !user) {
       setError('❌ Không xác định được người dùng.');
@@ -46,12 +47,13 @@ useEffect(() => {
       return;
     }
 
-    // 2️⃣ Lấy profile từ bảng profiles bằng email
+    // 2️⃣ Lấy profile từ bảng profiles bằng ID (nên ưu tiên lấy bằng id)
     const { data: profile, error: profileError } = await supabase
       .from('profiles')
       .select('id, email, name')
-      .eq('email', user.email)  // Dùng email để đảm bảo khớp
+      .eq('id', user.id)
       .maybeSingle();
+    console.log("🔹 [PROFILE]", profile, profileError);
 
     if (!profile) {
       setError('❌ Không tìm thấy profile cho user hiện tại.');
@@ -66,6 +68,7 @@ useEffect(() => {
       .from('permissions')
       .select('role, project_id')
       .eq('user_id', profile.id);
+    console.log("🔹 [PERMISSIONS]", permissionsData, permissionsError);
 
     if (!permissionsData || permissionsData.length === 0) {
       console.warn("⚠️ User không có quyền truy cập project nào.");
@@ -76,12 +79,14 @@ useEffect(() => {
     }
 
     const projectIds = permissionsData.map(p => p.project_id);
+    console.log("🔹 [PROJECT IDS]", projectIds);
 
-    // 4️⃣ Lấy project theo danh sách ID
+    // 4️⃣ Lấy projects theo danh sách ID
     const { data: projectsData, error: prjErr } = await supabase
       .from('projects')
       .select('id, title, status')
       .in('id', projectIds);
+    console.log("🔹 [PROJECTS DATA]", projectsData, prjErr);
 
     const validProjects = (projectsData || []).map(proj => {
       const matched = permissionsData.find(p => p.project_id === proj.id);
@@ -95,8 +100,8 @@ useEffect(() => {
       .from('rounds')
       .select('id, project_id, round_number, status, open_at, close_at')
       .in('project_id', projectIds);
+    console.log("🔹 [ROUNDS DATA]", rnds, rndErr);
 
-    console.log("🔹 Rounds data:", rnds, rndErr);
     setRounds(rnds || []);
     setLoading(false);
   };
