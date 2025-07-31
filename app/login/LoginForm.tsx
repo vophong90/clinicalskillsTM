@@ -26,7 +26,7 @@ export default function LoginForm() {
       <div className="bg-white rounded-2xl shadow-2xl p-8 w-full max-w-md">
         <div className="flex flex-col items-center mb-6">
           {/* Đổi src sang logo của bạn */}
-          <img src="/logo.svg" alt="Logo" className="w-16 h-16 mb-2" />
+          <img src="/logo.jpg" alt="Logo" className="w-16 h-16 mb-2" />
           <h1 className="text-2xl font-bold text-blue-800 mb-1">Clinical Skills Delphi</h1>
           <span className="text-sm text-gray-500 mb-2">Đăng nhập để tham gia khảo sát</span>
         </div>
