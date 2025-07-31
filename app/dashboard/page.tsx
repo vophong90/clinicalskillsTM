@@ -13,18 +13,46 @@ export default function Dashboard() {
   const [name, setName] = useState<string>('');
 
   useEffect(() => {
-    const load = async () => {
-      const { data: profile } = await supabase.from('profiles').select('name').single();
-      setName(profile?.name ?? '');
+  const load = async () => {
+    const { data: { user }, error: userError } = await supabase.auth.getUser();
+    if (userError) {
+      console.error("Không lấy được user:", userError);
+      return;
+    }
 
-      const { data: prj } = await supabase.from('projects').select('id,title,status').order('created_at', { ascending: false });
-      setProjects(prj || []);
+    const userId = user?.id;
+    if (!userId) {
+      console.error("Không có ID user");
+      return;
+    }
 
-      const { data: rnd } = await supabase.from('rounds').select('id,project_id,round_number,status,open_at,close_at').order('round_number', { ascending: true });
-      setRounds(rnd || []);
-    };
-    load();
-  }, []);
+    const { data: profile, error: profileError } = await supabase
+      .from('profiles')
+      .select('name')
+      .eq('id', userId)
+      .single();
+
+    if (profileError) {
+      console.error("Không lấy được profile:", profileError);
+    }
+
+    setName(profile?.name ?? '');
+
+    const { data: prj } = await supabase
+      .from('projects')
+      .select('id,title,status')
+      .order('created_at', { ascending: false });
+    setProjects(prj || []);
+
+    const { data: rnd } = await supabase
+      .from('rounds')
+      .select('id,project_id,round_number,status,open_at,close_at')
+      .order('round_number', { ascending: true });
+    setRounds(rnd || []);
+  };
+
+  load();
+}, []);
 
   return (
     <Protected>
