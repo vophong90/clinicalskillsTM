@@ -19,24 +19,44 @@ export default function SurveyPage() {
 
   useEffect(() => {
     const load = async () => {
-      // Load round
-      const { data: r, error: er } = await supabase.from('rounds').select('*').eq('id', roundId).single();
-      if (er || !r) { setMessage('Không tìm thấy vòng khảo sát.'); return; }
+      setLoading(true);
+
+      // 1️⃣ Load round
+      const { data: r, error: er } = await supabase
+        .from('rounds')
+        .select('*')
+        .eq('id', roundId)
+        .single();
+      if (er || !r) { setMessage('Không tìm thấy vòng khảo sát.'); setLoading(false); return; }
       setRound(r);
-      // Load items of this project
-      const { data: its } = await supabase.from('items').select('id,prompt,options_json,order,project_id').eq('project_id', r.project_id).order('order', { ascending: true });
-      setItems(its || []);
-      // Load existing responses for this round
+
+      // 2️⃣ Load items & responses song song
+      const { data: its } = await supabase
+        .from('items')
+        .select('id,prompt,options_json,item_order,project_id')
+        .eq('project_id', r.project_id)
+        .order('item_order', { ascending: true });
+
       const { data: session } = await supabase.auth.getSession();
       const userId = session.session?.user.id;
+
+      let resps: any[] = [];
       if (userId) {
-        const { data: resps } = await supabase.from('responses').select('item_id, answer_json').eq('round_id', r.id).eq('user_id', userId);
-        const map: Record<string, any> = {};
-        (resps || []).forEach((row: any) => {
-          map[row.item_id] = row.answer_json?.value ?? row.answer_json?.choices ?? row.answer_json;
-        });
-        setAnswers(map);
+        const { data } = await supabase
+          .from('responses')
+          .select('item_id, answer_json')
+          .eq('round_id', r.id)
+          .eq('user_id', userId);
+        resps = data || [];
       }
+
+      setItems(its || []);
+      const map: Record<string, any> = {};
+      resps.forEach((row: any) => {
+        map[row.item_id] = row.answer_json?.value ?? row.answer_json?.choices ?? row.answer_json;
+      });
+      setAnswers(map);
+
       setLoading(false);
     };
     load();
