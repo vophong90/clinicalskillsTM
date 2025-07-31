@@ -17,7 +17,7 @@ type Item = {
   id: string;
   prompt: string;
   options_json: ItemOptions;
-  order: number;
+  item_order: number;
   project_id: string;
   round_id?: string;
   type: ItemType;
@@ -67,7 +67,7 @@ export default function SurveyPage() {
       // Get items
       const { data: its, error: itErr } = await supabase
         .from('items')
-        .select('id,prompt,options_json,type,order,project_id,round_id')
+        .select('id,prompt,options_json,type,item_order,project_id,round_id')
         .eq('project_id', r.project_id)
         .eq('round_id', r.id)
         .order('order', { ascending: true });
