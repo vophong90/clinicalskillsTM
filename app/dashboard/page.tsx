@@ -32,56 +32,61 @@ export default function Dashboard() {
 
   useEffect(() => {
     const loadData = async () => {
-      setLoading(true);
+  setLoading(true);
 
-      const {
-        data: { user },
-        error: userError
-      } = await supabase.auth.getUser();
+  const {
+    data: { user },
+    error: userError
+  } = await supabase.auth.getUser();
 
-      if (userError || !user) {
-        setError('❌ Không xác định được người dùng. Vui lòng đăng nhập lại.');
-        setLoading(false);
-        return;
-      }
+  if (userError || !user) {
+    setError('❌ Không xác định được người dùng. Vui lòng đăng nhập lại.');
+    setLoading(false);
+    return;
+  }
 
-      // Lấy profile.name theo user.id
-      const { data: profile, error: profileError } = await supabase
-        .from('profiles')
-        .select('name')
-        .eq('id', user.id)
-        .maybeSingle();
+  // Lấy profile.name
+  const { data: profile, error: profileError } = await supabase
+    .from('profiles')
+    .select('name')
+    .eq('id', user.id)
+    .maybeSingle();
 
-      if (profileError) {
-        console.error('Lỗi khi lấy profile:', profileError);
-        setError('❌ Không thể tải thông tin người dùng.');
-      } else if (profile) {
-        setName(profile.name);
-      } else {
-        console.warn('Không tìm thấy profile tương ứng.');
-      }
+  if (profileError) {
+    console.error('Lỗi khi lấy profile:', profileError);
+    setError('❌ Không thể tải thông tin người dùng.');
+  } else if (profile) {
+    setName(profile.name);
+  }
 
-      // Gọi song song project và round
-      const [prjRes, rndRes] = await Promise.all([
-        supabase
-          .from('projects')
-          .select('id,title,status')
-          .order('created_at', { ascending: false }),
-        supabase
-          .from('rounds')
-          .select('id,project_id,round_number,status,open_at,close_at')
-          .order('round_number', { ascending: true })
-      ]);
+  // Lấy các project thuộc user
+  const { data: prjs, error: prjErr } = await supabase
+    .from('projects')
+    .select('id,title,status')
+    .eq('created_by', user.id)
+    .order('created_at', { ascending: false });
 
-      if (prjRes.error) console.error('Lỗi lấy projects:', prjRes.error);
-      if (rndRes.error) console.error('Lỗi lấy rounds:', rndRes.error);
+  if (prjErr) {
+    console.error('Lỗi lấy projects:', prjErr);
+    setProjects([]);
+    setRounds([]);
+    setLoading(false);
+    return;
+  }
 
-      setProjects(prjRes.data || []);
-      setRounds(rndRes.data || []);
-      setLoading(false);
-    };
+  setProjects(prjs || []);
 
-    loadData();
+  // Lấy các rounds thuộc các project vừa tìm
+  const { data: rnds, error: rndErr } = await supabase
+    .from('rounds')
+    .select('id,project_id,round_number,status,open_at,close_at')
+    .in('project_id', (prjs || []).map(p => p.id));
+
+  if (rndErr) console.error('Lỗi lấy rounds:', rndErr);
+  setRounds(rnds || []);
+  setLoading(false);
+};
+  loadData();
   }, []);
 
   const handleLogout = async () => {
