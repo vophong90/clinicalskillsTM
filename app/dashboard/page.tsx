@@ -39,7 +39,6 @@ useEffect(() => {
 
     // 1️⃣ Lấy user từ Supabase Auth
     const { data: { user }, error: userError } = await supabase.auth.getUser();
-    console.log("🔹 Auth user:", user, userError);
 
     if (userError || !user) {
       setError('❌ Không xác định được người dùng.');
@@ -54,8 +53,6 @@ useEffect(() => {
       .eq('email', user.email)  // Dùng email để đảm bảo khớp
       .maybeSingle();
 
-    console.log("🔹 Profile data:", profile, profileError);
-
     if (!profile) {
       setError('❌ Không tìm thấy profile cho user hiện tại.');
       setLoading(false);
@@ -69,8 +66,6 @@ useEffect(() => {
       .from('permissions')
       .select('role, project_id')
       .eq('user_id', profile.id);
-
-    console.log("🔹 Permissions data:", permissionsData, permissionsError);
 
     if (!permissionsData || permissionsData.length === 0) {
       console.warn("⚠️ User không có quyền truy cập project nào.");
@@ -87,8 +82,6 @@ useEffect(() => {
       .from('projects')
       .select('id, title, status')
       .in('id', projectIds);
-
-    console.log("🔹 Projects data:", projectsData, prjErr);
 
     const validProjects = (projectsData || []).map(proj => {
       const matched = permissionsData.find(p => p.project_id === proj.id);
@@ -153,7 +146,6 @@ return (
     ) : (
       <p>Chưa có vòng khảo sát nào.</p>
     )}
-    <pre>{JSON.stringify({ projects, rounds }, null, 2)}</pre>
   </div>
 );
 }
