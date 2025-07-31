@@ -70,7 +70,7 @@ export default function SurveyPage() {
         .select('id,prompt,options_json,type,item_order,project_id,round_id')
         .eq('project_id', r.project_id)
         .eq('round_id', r.id)
-        .order('order', { ascending: true });
+        .order('item_order', { ascending: true });
       if (itErr) {
         setMessage('Lỗi tải câu hỏi: ' + itErr.message);
         setLoading(false);
