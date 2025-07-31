@@ -1,3 +1,4 @@
+import './globals.css';
 export const metadata = {
   title: 'Clinical Skills Delphi',
   description: 'MVP khảo sát kỹ năng lâm sàng',
