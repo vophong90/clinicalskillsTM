@@ -118,39 +118,96 @@ useEffect(() => {
   if (error) return <div>{error}</div>;
 
 return (
-  <div>
-    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-      <h1>Dashboard {name ? `— ${name}` : ''}</h1>
-      <button onClick={handleLogout}>Đăng xuất</button>
-    </div>
-
-    <h2>Dự án</h2>
-    {projects.length > 0 ? (
-      <ul>
-        {projects.map((p) => (
-          <li key={p.id}>
-            <strong>{p.title}</strong> — {p.status} &nbsp;
-            <span style={{ fontStyle: 'italic', color: 'gray' }}>({p.role})</span>
-          </li>
-        ))}
-      </ul>
-    ) : (
-      <p>Chưa có dự án nào.</p>
-    )}
-
-    <h2>Vòng khảo sát</h2>
-    {rounds.length > 0 ? (
-      <ul>
-        {rounds.map((r) => (
-          <li key={r.id}>
-            Vòng {r.round_number} — {r.status} &nbsp;
-            <Link href={`/survey/${r.id}`}>Vào trả lời</Link>
-          </li>
-        ))}
-      </ul>
-    ) : (
-      <p>Chưa có vòng khảo sát nào.</p>
-    )}
+<div className="max-w-3xl mx-auto px-2 py-6">
+  <div className="flex justify-between items-center mb-6">
+    <h1 className="text-3xl font-bold text-indigo-900">
+      Dashboard {name ? <span className="text-lg text-gray-400">— {name}</span> : null}
+    </h1>
+    <button
+      onClick={handleLogout}
+      className="bg-gray-200 hover:bg-red-100 text-gray-600 hover:text-red-600 rounded px-3 py-1 text-sm font-medium shadow"
+    >
+      Đăng xuất
+    </button>
   </div>
+
+  <h2 className="text-xl font-semibold text-indigo-700 mb-3">Dự án của bạn</h2>
+  {projects.length > 0 ? (
+    <div className="grid grid-cols-1 gap-6">
+      {projects.map((p) => (
+        <div
+          key={p.id}
+          className="bg-white rounded-2xl shadow-lg hover:shadow-2xl transition p-6 border border-gray-100 flex flex-col gap-3"
+        >
+          <div className="flex items-center justify-between">
+            <div>
+              <span className="text-lg font-bold text-indigo-800">{p.title}</span>
+              <span
+                className={`ml-2 px-2 py-1 rounded text-xs font-semibold
+                  ${p.status === "active"
+                    ? "bg-green-100 text-green-700"
+                    : p.status === "completed"
+                    ? "bg-blue-100 text-blue-700"
+                    : "bg-gray-100 text-gray-400"}`}
+              >
+                {p.status}
+              </span>
+            </div>
+            <span className="inline-block px-2 py-1 rounded bg-indigo-50 text-indigo-700 text-xs font-semibold">
+              {p.role}
+            </span>
+          </div>
+          <div className="mt-2">
+            <div className="text-sm text-gray-500 font-semibold mb-1">
+              Các vòng khảo sát
+            </div>
+            <ul className="space-y-1">
+              {rounds.filter((r) => r.project_id === p.id).length > 0 ? (
+                rounds
+                  .filter((r) => r.project_id === p.id)
+                  .map((r) => (
+                    <li
+                      key={r.id}
+                      className="flex items-center justify-between px-3 py-1 bg-gray-50 rounded group hover:bg-indigo-50"
+                    >
+                      <span>
+                        <span className="font-medium">Vòng {r.round_number}</span>
+                        {" – "}
+                        <span
+                          className={`font-semibold ${
+                            r.status === "active"
+                              ? "text-green-600"
+                              : r.status === "closed"
+                              ? "text-gray-400"
+                              : "text-yellow-700"
+                          }`}
+                        >
+                          {r.status}
+                        </span>
+                      </span>
+                      <Link
+                        href={`/survey/${r.id}`}
+                        className="ml-4 text-blue-700 hover:underline text-sm font-medium"
+                      >
+                        Vào trả lời
+                      </Link>
+                    </li>
+                  ))
+              ) : (
+                <li className="text-gray-400 italic">
+                  Chưa có vòng khảo sát nào.
+                </li>
+              )}
+            </ul>
+          </div>
+        </div>
+      ))}
+    </div>
+  ) : (
+    <div className="text-gray-400 italic mt-4">
+      Bạn chưa được phân quyền ở dự án nào.
+    </div>
+  )}
+</div>
 );
 }
