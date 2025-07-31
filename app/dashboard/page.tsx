@@ -153,6 +153,7 @@ return (
     ) : (
       <p>Chưa có vòng khảo sát nào.</p>
     )}
+    <pre>{JSON.stringify({ projects, rounds }, null, 2)}</pre>
   </div>
 );
 }
