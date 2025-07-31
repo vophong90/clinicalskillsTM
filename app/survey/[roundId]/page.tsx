@@ -110,6 +110,7 @@ export default function SurveyPage() {
         </div>
         {message && <p>{message}</p>}
       </form>
+      <pre>{JSON.stringify({ items, round }, null, 2)}</pre>
     </Protected>
   );
 }
