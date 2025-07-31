@@ -116,47 +116,47 @@ export default function Dashboard() {
   if (error) return <div>{error}</div>;
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col items-center py-12">
-      {/* Tên người dùng */}
-      <div className="text-3xl font-bold text-indigo-900 mb-2">{name}</div>
-      <Link href={`/stats/${round.id}`} className="underline text-indigo-600 ml-4 hover:text-indigo-800">
-      Kết quả khảo sát
-      </Link>
-      <button onClick={handleLogout} className="absolute top-6 right-6 px-4 py-1 rounded bg-gray-200 hover:bg-gray-300 text-gray-600 text-sm font-semibold">
-        Đăng xuất
-      </button>
-      <div className="w-full max-w-2xl space-y-8 mt-4">
-        {projects.map((project) => (
-          <div
-            key={project.id}
-            className="bg-white rounded-2xl shadow-xl p-6 flex flex-col gap-4"
-          >
-            <div className="flex items-center justify-between gap-2">
-              <div className="flex items-center gap-3">
-                <span className="text-lg font-bold text-indigo-800">{project.title}</span>
-                {project.status === "active" && (
-                  <span className="inline-flex items-center gap-1 px-2 py-1 rounded text-xs bg-green-50 text-green-700 font-semibold">
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={3} viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7"/>
-                    </svg>
-                  </span>
-                )}
-              </div>
-              {/* Role tiếng Việt */}
-              <span className="inline-flex items-center gap-1 px-2 py-1 rounded text-xs bg-indigo-100 text-indigo-700 font-semibold shadow-sm">
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-                  <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2"/>
-                  <circle cx="12" cy="12" r="3" fill="currentColor"/>
-                </svg>
-                {translateRole(project.role ?? "?")}
-              </span>
+  <div className="min-h-screen bg-gray-50 flex flex-col items-center py-12">
+    {/* Tên người dùng */}
+    <div className="text-3xl font-bold text-indigo-900 mb-2">{name}</div>
+    <button onClick={handleLogout} className="absolute top-6 right-6 px-4 py-1 rounded bg-gray-200 hover:bg-gray-300 text-gray-600 text-sm font-semibold">
+      Đăng xuất
+    </button>
+    <div className="w-full max-w-2xl space-y-8 mt-4">
+      {projects.map((project) => (
+        <div
+          key={project.id}
+          className="bg-white rounded-2xl shadow-xl p-6 flex flex-col gap-4"
+        >
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-3">
+              <span className="text-lg font-bold text-indigo-800">{project.title}</span>
+              {project.status === "active" && (
+                <span className="inline-flex items-center gap-1 px-2 py-1 rounded text-xs bg-green-50 text-green-700 font-semibold">
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={3} viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7"/>
+                  </svg>
+                </span>
+              )}
             </div>
+            {/* Role tiếng Việt */}
+            <span className="inline-flex items-center gap-1 px-2 py-1 rounded text-xs bg-indigo-100 text-indigo-700 font-semibold shadow-sm">
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2"/>
+                <circle cx="12" cy="12" r="3" fill="currentColor"/>
+              </svg>
+              {translateRole(project.role ?? "?")}
+            </span>
+          </div>
 
-            {/* Danh sách vòng khảo sát */}
-            <div>
-              <div className="text-sm text-gray-500 mb-2">Các vòng khảo sát</div>
-              {project.rounds && project.rounds.length > 0 ? (
-                project.rounds.map(round => (
+          {/* Danh sách vòng khảo sát */}
+          <div>
+            <div className="text-sm text-gray-500 mb-2">Các vòng khảo sát</div>
+            {project.rounds && project.rounds.length > 0 ? (
+              project.rounds.map(round => {
+                // Chỉ các role này mới được xem kết quả
+                const canViewStats = ["secretary", "viewer", "admin"].includes(project.role ?? "");
+                return (
                   <div
                     key={round.id}
                     className="flex items-center justify-between bg-gray-50 rounded-lg p-3 mb-2"
@@ -172,21 +172,40 @@ export default function Dashboard() {
                         </span>
                       )}
                     </div>
-                    <a
-                      href={`/survey/${round.id}`}
-                      className="px-4 py-1 bg-green-700 hover:bg-green-800 text-white rounded-lg font-semibold shadow transition"
-                    >
-                      Vào trả lời
-                    </a>
+                    <div className="flex gap-2">
+                      <a
+                        href={`/survey/${round.id}`}
+                        className="px-4 py-1 bg-green-700 hover:bg-green-800 text-white rounded-lg font-semibold shadow transition"
+                      >
+                        Vào trả lời
+                      </a>
+                      {canViewStats ? (
+                        <Link
+                          href={`/stats/${round.id}`}
+                          className="px-4 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-semibold shadow transition"
+                        >
+                          Kết quả khảo sát
+                        </Link>
+                      ) : (
+                        <button
+                          disabled
+                          className="px-4 py-1 bg-gray-200 text-gray-400 rounded-lg font-semibold shadow cursor-not-allowed"
+                          title="Bạn không có quyền xem kết quả"
+                        >
+                          Kết quả khảo sát
+                        </button>
+                      )}
+                    </div>
                   </div>
-                ))
-              ) : (
-                <div className="text-gray-400 italic text-sm">Chưa có vòng khảo sát nào</div>
-              )}
-            </div>
+                )
+              })
+            ) : (
+              <div className="text-gray-400 italic text-sm">Chưa có vòng khảo sát nào</div>
+            )}
           </div>
-        ))}
-      </div>
+        </div>
+      ))}
     </div>
-  );
+  </div>
+);
 }
