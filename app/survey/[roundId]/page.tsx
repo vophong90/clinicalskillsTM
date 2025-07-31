@@ -305,7 +305,7 @@ export default function SurveyPage() {
        <div className="flex justify-between mt-8">
   <button
     className="px-4 py-1 rounded-lg border text-sm font-medium text-indigo-700 border-indigo-200 hover:bg-indigo-50"
-    disabled={currentIndex === 0}
+    disabled={curIndex === 0}
     onClick={goBack}
   >
     Quay lại
