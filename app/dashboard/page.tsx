@@ -119,7 +119,7 @@ export default function Dashboard() {
     <div className="min-h-screen bg-gray-50 flex flex-col items-center py-12">
       {/* Tên người dùng */}
       <div className="text-3xl font-bold text-indigo-900 mb-2">{name}</div>
-      <Link href="/admin/statistics" className="underline text-indigo-600 ml-4 hover:text-indigo-800">
+      <Link href={`/stats/${round.id}`} className="underline text-indigo-600 ml-4 hover:text-indigo-800">
       Kết quả khảo sát
       </Link>
       <button onClick={handleLogout} className="absolute top-6 right-6 px-4 py-1 rounded bg-gray-200 hover:bg-gray-300 text-gray-600 text-sm font-semibold">
