@@ -195,7 +195,7 @@ export default function SurveyPage() {
     const choices = it.options_json?.choices ?? [];
     const isActive = round?.status === 'active' && !submitted;
     return (
-      <div key={it.id} className="bg-white rounded-2xl shadow-md p-6 flex flex-col gap-3 mb-2">
+      <div key={it.id} className="bg-white shadow-2xl rounded-2xl p-8 mb-8 w-full max-w-2xl mx-auto">
         <div className="flex items-center gap-3 mb-2">
           <span className="text-sm text-gray-400 font-semibold">Câu {idx + 1}/{items.length}</span>
           <span className="font-bold text-lg text-indigo-800 flex-1">{it.prompt}</span>
@@ -302,39 +302,38 @@ export default function SurveyPage() {
         {/* Hiện từng câu hỏi */}
         {items[curIndex] && renderQuestion(items[curIndex], curIndex)}
         {/* Nút điều hướng */}
-        <div className="flex gap-4 justify-center my-5">
-          <button
-            onClick={() => goTo(curIndex - 1)}
-            className="px-4 py-2 rounded bg-gray-200 text-gray-700 font-semibold"
-            disabled={curIndex === 0}
-            type="button"
-          >Quay lại</button>
-          <button
-            onClick={() => goTo(curIndex + 1)}
-            className="px-4 py-2 rounded bg-indigo-600 text-white font-semibold"
-            disabled={curIndex === items.length - 1}
-            type="button"
-          >Tiếp tục</button>
-        </div>
+       <div className="flex justify-between mt-8">
+  <button
+    className="px-4 py-1 rounded-lg border text-sm font-medium text-indigo-700 border-indigo-200 hover:bg-indigo-50"
+    disabled={currentIndex === 0}
+    onClick={goBack}
+  >
+    Quay lại
+  </button>
+  <button
+    className="px-4 py-1 rounded-lg border text-sm font-medium text-indigo-700 border-indigo-200 hover:bg-indigo-50"
+    disabled={currentIndex === items.length - 1}
+    onClick={goNext}
+  >
+    Tiếp tục
+  </button>
+</div>
         {/* Nút gửi bài */}
-        <div className="flex flex-col gap-2 items-center">
-          <button
-            onClick={() => save(true)}
-            disabled={!isAllAnswered || round.status !== 'active' || submitted}
-            className="bg-green-700 hover:bg-green-800 text-white px-8 py-2 rounded-lg font-bold shadow disabled:opacity-60"
-            type="button"
-          >
-            Gửi bản cuối
-          </button>
-          <button
-            onClick={() => save(false)}
-            disabled={round.status !== 'active' || submitted}
-            className="bg-gray-400 hover:bg-gray-500 text-white px-8 py-2 rounded-lg font-semibold shadow disabled:opacity-60"
-            type="button"
-          >
-            Lưu nháp
-          </button>
-        </div>
+        <div className="flex justify-between items-center gap-4 w-full max-w-2xl mx-auto mb-3">
+  <button
+    onClick={handleSave}
+    className="px-6 py-3 bg-gray-400 text-white rounded-xl font-semibold shadow hover:bg-gray-500 transition w-[180px]"
+  >
+    Lưu nháp
+  </button>
+  <button
+    onClick={handleSubmit}
+    className="px-6 py-3 bg-green-700 text-white rounded-xl font-bold shadow hover:bg-green-800 transition w-[180px]"
+    disabled={!canSubmit}
+  >
+    Gửi bản cuối
+  </button>
+</div>
         {!isAllAnswered && !submitted && (
           <div className="text-orange-600 mt-2 font-semibold">
             ⚠️ Bạn cần trả lời tất cả các câu hỏi trước khi gửi bản cuối.
