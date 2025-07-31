@@ -22,7 +22,7 @@ type Round = {
   close_at: string | null;
 };
 
-function translateRole(roleId) {
+function translateRole(roleId: string) {
   switch (roleId) {
     case "admin": return "Quản trị viên";
     case "secretary": return "Thư ký hội đồng";
