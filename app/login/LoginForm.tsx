@@ -23,15 +23,18 @@ export default function LoginForm() {
 
   return (
     <div className="min-h-screen flex flex-col justify-center items-center bg-gradient-to-br from-blue-100 to-indigo-200 px-2">
+      {/* CARD LOGIN */}
       <div className="bg-white rounded-2xl shadow-xl p-8 w-full max-w-md flex flex-col items-center">
-        {/* Logo nhỏ gọn trong card */}
-        <img
-          src="/logo.jpg"
-          alt="Logo"
-          className="w-24 h-24 rounded-full shadow mb-4 object-cover border-4 border-blue-200"
-          style={{ background: "#fff" }}
-        />
-        <h1 className="text-3xl font-extrabold text-blue-800 mb-1 tracking-tight text-center drop-shadow-sm">
+        {/* Logo nhỏ GỌN, nằm trong card, kích thước cố định */}
+        <div className="w-20 h-20 flex justify-center items-center mb-4 rounded-full overflow-hidden border-4 border-blue-200 bg-white shadow">
+          <img
+            src="/logo.jpg"
+            alt="Logo"
+            className="object-contain w-full h-full"
+            style={{ maxWidth: 80, maxHeight: 80 }}
+          />
+        </div>
+        <h1 className="text-2xl font-extrabold text-blue-800 mb-1 text-center">
           Clinical Skills Delphi
         </h1>
         <p className="text-base text-gray-600 mb-6 text-center">
