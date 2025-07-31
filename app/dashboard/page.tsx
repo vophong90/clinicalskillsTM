@@ -119,39 +119,40 @@ useEffect(() => {
   if (loading) return <div>🔄 Đang tải dữ liệu...</div>;
   if (error) return <div>{error}</div>;
 
-  return (
-    <Protected>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <h1>Dashboard {name ? `— ${name}` : ''}</h1>
-        <button onClick={handleLogout}>Đăng xuất</button>
-      </div>
+return (
+  <div>
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      <h1>Dashboard {name ? `— ${name}` : ''}</h1>
+      <button onClick={handleLogout}>Đăng xuất</button>
+    </div>
 
-      <h2>Dự án</h2>
-      {projects.length > 0 ? (
-        <ul>
-          {projects.map((p) => (
-            <li key={p.id}>
-              <strong>{p.title}</strong> — {p.status} &nbsp;
-              <span style={{ fontStyle: 'italic', color: 'gray' }}>({p.role})</span>
-            </li>
-          ))}
-        </ul>
-      ) : (
-        <p>Chưa có dự án nào.</p>
-      )}
+    <h2>Dự án</h2>
+    {projects.length > 0 ? (
+      <ul>
+        {projects.map((p) => (
+          <li key={p.id}>
+            <strong>{p.title}</strong> — {p.status} &nbsp;
+            <span style={{ fontStyle: 'italic', color: 'gray' }}>({p.role})</span>
+          </li>
+        ))}
+      </ul>
+    ) : (
+      <p>Chưa có dự án nào.</p>
+    )}
 
-      <h2>Vòng khảo sát</h2>
-      {rounds.length > 0 ? (
-        <ul>
-          {rounds.map((r) => (
-            <li key={r.id}>
-              Vòng {r.round_number} — {r.status} &nbsp;
-              <Link href={`/survey/${r.id}`}>Vào trả lời</Link>
-            </li>
-          ))}
-        </ul>
-      ) : (
-        <p>Chưa có vòng khảo sát nào.</p>
-      )}
-  );
+    <h2>Vòng khảo sát</h2>
+    {rounds.length > 0 ? (
+      <ul>
+        {rounds.map((r) => (
+          <li key={r.id}>
+            Vòng {r.round_number} — {r.status} &nbsp;
+            <Link href={`/survey/${r.id}`}>Vào trả lời</Link>
+          </li>
+        ))}
+      </ul>
+    ) : (
+      <p>Chưa có vòng khảo sát nào.</p>
+    )}
+  </div>
+);
 }
