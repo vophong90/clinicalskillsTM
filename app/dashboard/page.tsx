@@ -22,6 +22,17 @@ type Round = {
   close_at: string | null;
 };
 
+function translateRole(roleId) {
+  switch (roleId) {
+    case "admin": return "Quản trị viên";
+    case "secretary": return "Thư ký hội đồng";
+    case "viewer": return "Quan sát viên";
+    case "core_expert": return "Chuyên gia nòng cốt";
+    case "external_expert": return "Chuyên gia bên ngoài";
+    default: return roleId;
+  }
+}
+
 export default function Dashboard() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [rounds, setRounds] = useState<Round[]>([]);
@@ -118,96 +129,69 @@ useEffect(() => {
   if (error) return <div>{error}</div>;
 
 return (
-<div className="max-w-3xl mx-auto px-2 py-6">
-  <div className="flex justify-between items-center mb-6">
-    <h1 className="text-3xl font-bold text-indigo-900">
-      Dashboard {name ? <span className="text-lg text-gray-400">— {name}</span> : null}
-    </h1>
-    <button
-      onClick={handleLogout}
-      className="bg-gray-200 hover:bg-red-100 text-gray-600 hover:text-red-600 rounded px-3 py-1 text-sm font-medium shadow"
-    >
-      Đăng xuất
-    </button>
-  </div>
+  <div className="min-h-screen bg-gray-50 flex flex-col items-center py-12">
+    {/* Tên người dùng */}
+    <div className="text-3xl font-bold text-indigo-900 mb-1">{name}</div>
 
-  <h2 className="text-xl font-semibold text-indigo-700 mb-3">Dự án của bạn</h2>
-  {projects.length > 0 ? (
-    <div className="grid grid-cols-1 gap-6">
-      {projects.map((p) => (
+    {/* Vai trò */}
+    <div className="flex items-center gap-2 mb-8">
+      <span className="inline-flex items-center gap-1 px-2 py-1 rounded text-xs bg-indigo-100 text-indigo-700 font-semibold shadow-sm">
+        <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+          <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2"/>
+          <circle cx="12" cy="12" r="3" fill="currentColor"/>
+        </svg>
+        {translateRole(role)}
+      </span>
+    </div>
+
+    <div className="w-full max-w-xl space-y-8">
+      {projects.map(project => (
         <div
-          key={p.id}
-          className="bg-white rounded-2xl shadow-lg hover:shadow-2xl transition p-6 border border-gray-100 flex flex-col gap-3"
+          key={project.id}
+          className="bg-white rounded-2xl shadow-xl p-6 flex flex-col gap-4"
         >
           <div className="flex items-center justify-between">
-            <div>
-              <span className="text-lg font-bold text-indigo-800">{p.title}</span>
-              <span
-                className={`ml-2 px-2 py-1 rounded text-xs font-semibold
-                  ${p.status === "active"
-                    ? "bg-green-100 text-green-700"
-                    : p.status === "completed"
-                    ? "bg-blue-100 text-blue-700"
-                    : "bg-gray-100 text-gray-400"}`}
-              >
-                {p.status}
+            <span className="text-xl font-extrabold text-indigo-800">{project.title}</span>
+            {project.status === "active" && (
+              <span className="inline-flex items-center gap-1 px-2 py-1 rounded text-xs bg-green-50 text-green-700 font-semibold">
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={3} viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7"/>
+                </svg>
+                Đang hoạt động
               </span>
-            </div>
-            <span className="inline-block px-2 py-1 rounded bg-indigo-50 text-indigo-700 text-xs font-semibold">
-              {p.role}
-            </span>
+            )}
           </div>
-          <div className="mt-2">
-            <div className="text-sm text-gray-500 font-semibold mb-1">
-              Các vòng khảo sát
-            </div>
-            <ul className="space-y-1">
-              {rounds.filter((r) => r.project_id === p.id).length > 0 ? (
-                rounds
-                  .filter((r) => r.project_id === p.id)
-                  .map((r) => (
-                    <li
-                      key={r.id}
-                      className="flex items-center justify-between px-3 py-1 bg-gray-50 rounded group hover:bg-indigo-50"
-                    >
-                      <span>
-                        <span className="font-medium">Vòng {r.round_number}</span>
-                        {" – "}
-                        <span
-                          className={`font-semibold ${
-                            r.status === "active"
-                              ? "text-green-600"
-                              : r.status === "closed"
-                              ? "text-gray-400"
-                              : "text-yellow-700"
-                          }`}
-                        >
-                          {r.status}
-                        </span>
-                      </span>
-                      <Link
-                        href={`/survey/${r.id}`}
-                        className="ml-4 text-blue-700 hover:underline text-sm font-medium"
-                      >
-                        Vào trả lời
-                      </Link>
-                    </li>
-                  ))
-              ) : (
-                <li className="text-gray-400 italic">
-                  Chưa có vòng khảo sát nào.
-                </li>
-              )}
-            </ul>
+
+          <div>
+            <div className="text-sm text-gray-500 mb-2">Các vòng khảo sát</div>
+            {project.rounds.map(round => (
+              <div
+                key={round.id}
+                className="flex items-center justify-between bg-gray-50 rounded-lg p-3 mb-1"
+              >
+                <div className="flex items-center gap-2">
+                  <span className="font-medium">Vòng {round.round_number}</span>
+                  {round.status === "active" && (
+                    <span className="inline-flex items-center gap-1 text-green-700 ml-1 text-sm">
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={3} viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7"/>
+                      </svg>
+                      Đang hoạt động
+                    </span>
+                  )}
+                </div>
+                <a
+                  href={`/survey/${round.id}`}
+                  className="px-4 py-1 bg-green-700 hover:bg-green-800 text-white rounded-lg font-semibold shadow transition"
+                >
+                  Vào trả lời
+                </a>
+              </div>
+            ))}
           </div>
         </div>
       ))}
     </div>
-  ) : (
-    <div className="text-gray-400 italic mt-4">
-      Bạn chưa được phân quyền ở dự án nào.
-    </div>
-  )}
-</div>
+  </div>
 );
 }
