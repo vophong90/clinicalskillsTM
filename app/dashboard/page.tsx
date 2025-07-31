@@ -153,6 +153,5 @@ useEffect(() => {
       ) : (
         <p>Chưa có vòng khảo sát nào.</p>
       )}
-    </Protected>
   );
 }
