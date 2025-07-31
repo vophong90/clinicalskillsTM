@@ -234,8 +234,6 @@ export default function SurveyPage() {
 
         {message && <p>{message}</p>}
       </form>
-
-      <pre>{JSON.stringify({ items, round }, null, 2)}</pre>
     </Protected>
   );
 }
