@@ -43,14 +43,14 @@ export default function Dashboard() {
       setLoading(false);
       return;
     }
-
+console.log("🔹 User info:", user);
     // 📛 Lấy tên từ bảng profiles
     const { data: profile, error: profileError } = await supabase
       .from('profiles')
       .select('name')
       .eq('id', user.id)
       .maybeSingle();
-
+console.log("🔹 Profile data:", profile, profileError);
     if (profileError) {
       console.error('Lỗi khi lấy profile:', profileError);
     } else if (profile) {
@@ -62,7 +62,7 @@ export default function Dashboard() {
       .from('permissions')
       .select('role, project_id')
       .eq('user_id', user.id);
-
+console.log("🔹 Permissions data:", permissionsData, permissionsError);
     if (permissionsError) {
       console.error('Lỗi khi lấy permissions:', permissionsError);
       setProjects([]);
@@ -84,7 +84,7 @@ export default function Dashboard() {
       .from('projects')
       .select('id, title, status')
       .in('id', projectIds);
-
+console.log("🔹 Projects data:", projectsData, prjErr);
     if (prjErr) {
       console.error('Lỗi khi lấy projects:', prjErr);
       setProjects([]);
@@ -106,7 +106,7 @@ export default function Dashboard() {
       .from('rounds')
       .select('id, project_id, round_number, status, open_at, close_at')
       .in('project_id', projectIds);
-
+console.log("🔹 Rounds data:", rnds, rndErr);
     if (rndErr) {
       console.error('Lỗi khi lấy rounds:', rndErr);
     }
