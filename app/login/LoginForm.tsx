@@ -1,95 +1,94 @@
-'use client';
-import { useState } from 'react';
-import { supabase } from '@/lib/supabaseClient';
+"use client";
+import { useState } from "react";
+import { supabase } from "@/lib/supabaseClient";
 
 export default function LoginForm() {
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [msg, setMsg] = useState('');
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [msg, setMsg] = useState("");
   const [loading, setLoading] = useState(false);
 
   async function handleLogin(e: React.FormEvent) {
     e.preventDefault();
-    setMsg('');
+    setMsg("");
     setLoading(true);
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
-    if (error) setMsg('❌ ' + error.message);
-    else setMsg('✅ Đăng nhập thành công! Đang chuyển trang...');
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error) setMsg("❌ " + error.message);
+    else setMsg("✅ Đăng nhập thành công! Đang chuyển trang...");
     setLoading(false);
   }
 
   return (
-    <div className="min-h-screen flex flex-col justify-center items-center bg-gradient-to-br from-blue-100 to-indigo-200 px-2">
-      {/* CARD LOGIN */}
-      <div className="bg-white rounded-2xl shadow-xl p-8 w-full max-w-md flex flex-col items-center">
-        {/* Logo nhỏ GỌN, nằm trong card, kích thước cố định */}
-        <div className="w-20 h-20 flex justify-center items-center mb-4 rounded-full overflow-hidden border-4 border-blue-200 bg-white shadow">
+    <div className="min-h-screen flex flex-col justify-between bg-gradient-to-br from-blue-50 to-green-100">
+      {/* Main Centered Content */}
+      <div className="flex flex-1 flex-col justify-center items-center">
+        <div className="w-full max-w-md bg-white shadow-2xl rounded-2xl px-8 py-10 flex flex-col items-center animate-fade-in">
+          {/* Logo */}
           <img
             src="/logo.jpg"
             alt="Logo"
-            className="object-contain w-full h-full"
-            style={{ maxWidth: 80, maxHeight: 80 }}
+            className="w-20 h-20 rounded-full shadow mb-6 border-4 border-green-200 object-contain"
+            style={{ background: "white" }}
           />
-        </div>
-        <h1 className="text-2xl font-extrabold text-blue-800 mb-1 text-center">
-          Clinical Skills Delphi
-        </h1>
-        <p className="text-base text-gray-600 mb-6 text-center">
-          Đăng nhập để tham gia khảo sát
-        </p>
-        <form onSubmit={handleLogin} className="w-full flex flex-col gap-4">
-          <label className="font-semibold text-gray-700" htmlFor="email">
-            Email
-          </label>
-          <input
-            id="email"
-            className="border border-blue-200 rounded-lg px-4 py-2 text-base focus:outline-none focus:ring-2 focus:ring-blue-400 transition"
-            type="email"
-            value={email}
-            onChange={e => setEmail(e.target.value)}
-            placeholder="Nhập email của bạn"
-            required
-            autoFocus
-          />
-          <label className="font-semibold text-gray-700" htmlFor="password">
-            Mật khẩu
-          </label>
-          <input
-            id="password"
-            className="border border-blue-200 rounded-lg px-4 py-2 text-base focus:outline-none focus:ring-2 focus:ring-blue-400 transition"
-            type="password"
-            value={password}
-            onChange={e => setPassword(e.target.value)}
-            placeholder="Nhập mật khẩu"
-            required
-          />
-          <button
-            type="submit"
-            disabled={loading || !email || !password}
-            className="mt-2 bg-blue-700 text-white py-2 rounded-lg font-semibold hover:bg-blue-800 transition disabled:opacity-60 text-lg shadow"
-          >
-            {loading ? "Đang đăng nhập..." : "Đăng nhập"}
-          </button>
-        </form>
-        <div className="mt-5 text-center text-sm text-gray-500">
-          Quên mật khẩu? <span className="text-blue-700 underline cursor-pointer hover:text-blue-900">Liên hệ thư ký hội đồng</span>
-        </div>
-        {msg && (
-          <div
-            className={`mt-5 text-center text-base font-medium ${
-              msg.startsWith("✅") ? "text-green-600" : "text-red-600"
-            }`}
-          >
-            {msg}
+          {/* Title */}
+          <h1 className="text-3xl font-extrabold text-green-700 mb-2 text-center tracking-tight">Clinical Skills Delphi</h1>
+          <div className="text-base text-gray-600 mb-6 text-center">Đăng nhập để tham gia khảo sát</div>
+          {/* Login Form */}
+          <form onSubmit={handleLogin} className="w-full flex flex-col gap-4">
+            <div>
+              <label className="block text-gray-700 font-semibold mb-1">Email</label>
+              <input
+                className="w-full border rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-green-400 bg-gray-50"
+                type="email"
+                value={email}
+                onChange={e => setEmail(e.target.value)}
+                placeholder="Nhập email của bạn"
+                required
+                autoFocus
+              />
+            </div>
+            <div>
+              <label className="block text-gray-700 font-semibold mb-1">Mật khẩu</label>
+              <input
+                className="w-full border rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-green-400 bg-gray-50"
+                type="password"
+                value={password}
+                onChange={e => setPassword(e.target.value)}
+                placeholder="Nhập mật khẩu"
+                required
+              />
+            </div>
+            <button
+              type="submit"
+              disabled={loading || !email || !password}
+              className="bg-green-700 text-white py-2 rounded-lg font-bold hover:bg-green-800 transition disabled:opacity-60 w-full mt-2"
+            >
+              {loading ? "Đang đăng nhập..." : "Đăng nhập"}
+            </button>
+          </form>
+          <div className="mt-5 text-center text-sm text-gray-500">
+            Quên mật khẩu? <span className="underline">Liên hệ thư ký hội đồng</span>
           </div>
-        )}
+          {msg && (
+            <div className={`mt-4 text-center text-base ${msg.startsWith("✅") ? "text-green-600" : "text-red-600"}`}>
+              {msg}
+            </div>
+          )}
+        </div>
       </div>
-      <div className="mt-8 mb-2 text-gray-400 text-xs text-center">
+      {/* Copyright */}
+      <footer className="w-full text-center text-xs text-gray-400 py-4">
         © {new Date().getFullYear()} Đội ngũ Clinical Delphi
-      </div>
+      </footer>
+      <style>{`
+        .animate-fade-in {
+          animation: fade-in .7s cubic-bezier(0.4,0,0.2,1);
+        }
+        @keyframes fade-in {
+          from { opacity: 0; transform: translateY(40px);}
+          to { opacity: 1; transform: none;}
+        }
+      `}</style>
     </div>
   );
 }
