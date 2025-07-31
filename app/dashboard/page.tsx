@@ -31,69 +31,65 @@ export default function Dashboard() {
 
   const router = useRouter();
 
- useEffect(() => {
+useEffect(() => {
   const loadData = async () => {
+    console.log("🚀 loadData started");
     setLoading(true);
     setError(null);
 
-    // 🔐 Lấy thông tin người dùng hiện tại
+    // 1️⃣ Lấy user từ Supabase Auth
     const { data: { user }, error: userError } = await supabase.auth.getUser();
+    console.log("🔹 Auth user:", user, userError);
+
     if (userError || !user) {
-      setError('❌ Không xác định được người dùng. Vui lòng đăng nhập lại.');
+      setError('❌ Không xác định được người dùng.');
       setLoading(false);
       return;
     }
-console.log("🔹 User info:", user);
-    // 📛 Lấy tên từ bảng profiles
+
+    // 2️⃣ Lấy profile từ bảng profiles bằng email
     const { data: profile, error: profileError } = await supabase
       .from('profiles')
-      .select('name')
-      .eq('id', user.id)
+      .select('id, email, name')
+      .eq('email', user.email)  // Dùng email để đảm bảo khớp
       .maybeSingle();
-console.log("🔹 Profile data:", profile, profileError);
-    if (profileError) {
-      console.error('Lỗi khi lấy profile:', profileError);
-    } else if (profile) {
-      setName(profile.name);
+
+    console.log("🔹 Profile data:", profile, profileError);
+
+    if (!profile) {
+      setError('❌ Không tìm thấy profile cho user hiện tại.');
+      setLoading(false);
+      return;
     }
 
-    // 🎯 Bước 1: Lấy quyền truy cập (permissions)
+    setName(profile.name);
+
+    // 3️⃣ Lấy permissions dựa trên profile.id
     const { data: permissionsData, error: permissionsError } = await supabase
       .from('permissions')
       .select('role, project_id')
-      .eq('user_id', user.id);
-console.log("🔹 Permissions data:", permissionsData, permissionsError);
-    if (permissionsError) {
-      console.error('Lỗi khi lấy permissions:', permissionsError);
+      .eq('user_id', profile.id);
+
+    console.log("🔹 Permissions data:", permissionsData, permissionsError);
+
+    if (!permissionsData || permissionsData.length === 0) {
+      console.warn("⚠️ User không có quyền truy cập project nào.");
       setProjects([]);
       setRounds([]);
       setLoading(false);
       return;
     }
 
-    const projectIds = permissionsData?.map(p => p.project_id) || [];
-    if (projectIds.length === 0) {
-      setProjects([]);
-      setRounds([]);
-      setLoading(false);
-      return;
-    }
+    const projectIds = permissionsData.map(p => p.project_id);
 
-    // 🎯 Bước 2: Lấy thông tin dự án
+    // 4️⃣ Lấy project theo danh sách ID
     const { data: projectsData, error: prjErr } = await supabase
       .from('projects')
       .select('id, title, status')
       .in('id', projectIds);
-console.log("🔹 Projects data:", projectsData, prjErr);
-    if (prjErr) {
-      console.error('Lỗi khi lấy projects:', prjErr);
-      setProjects([]);
-      setRounds([]);
-      setLoading(false);
-      return;
-    }
 
-    // 🧠 Ghép role từ permissions vào từng project
+    console.log("🔹 Projects data:", projectsData, prjErr);
+
     const validProjects = (projectsData || []).map(proj => {
       const matched = permissionsData.find(p => p.project_id === proj.id);
       return { ...proj, role: matched?.role || '' };
@@ -101,16 +97,13 @@ console.log("🔹 Projects data:", projectsData, prjErr);
 
     setProjects(validProjects);
 
-    // 🧪 Bước 3: Lấy danh sách rounds của các dự án đó
+    // 5️⃣ Lấy rounds
     const { data: rnds, error: rndErr } = await supabase
       .from('rounds')
       .select('id, project_id, round_number, status, open_at, close_at')
       .in('project_id', projectIds);
-console.log("🔹 Rounds data:", rnds, rndErr);
-    if (rndErr) {
-      console.error('Lỗi khi lấy rounds:', rndErr);
-    }
 
+    console.log("🔹 Rounds data:", rnds, rndErr);
     setRounds(rnds || []);
     setLoading(false);
   };
