@@ -187,7 +187,7 @@ export default function AdminItemManager() {
             <option value="multi">Chọn nhiều đáp án</option>
             <option value="radio">Chọn 1 đáp án</option>
             <option value="likert">Thang Likert</option>
-            <option value="binary">Nhị giá (Có/Không, Đúng/Sai)</option>
+            <option value="binary">Nhị giá (Có/Không)</option>
             <option value="text">Nhập tự do</option>
           </select>
           <input
@@ -196,10 +196,10 @@ export default function AdminItemManager() {
             min={1}
             value={itemOrder}
             onChange={e => setItemOrder(e.target.value)}
-            placeholder="Thứ tự câu hỏi (item_order)"
+            placeholder="Thứ tự câu hỏi"
           />
         </div>
-        <input className="border p-2" value={content} onChange={e=>setContent(e.target.value)} placeholder="Nội dung câu hỏi (prompt)" />
+        <input className="border p-2" value={content} onChange={e=>setContent(e.target.value)} placeholder="Nội dung câu hỏi" />
         {['multi', 'radio', 'likert', 'binary'].includes(itemType) &&
           <div className="pl-2">
             <label className="block font-semibold mb-1">Đáp án:</label>
@@ -256,7 +256,6 @@ export default function AdminItemManager() {
                 style={{ width: 54 }}
                 onChange={async (e) => {
                   const newOrder = Number(e.target.value);
-                  // Nếu giá trị mới hợp lệ, cập nhật order vào DB và reload bảng
                   if (newOrder > 0 && newOrder !== i.item_order) {
                     await supabase.from('items').update({ item_order: newOrder }).eq('id', i.id);
                     await loadAll();
