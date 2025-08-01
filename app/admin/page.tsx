@@ -3,6 +3,15 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 
+// ---- CONSTANTS ----
+const ITEM_TYPES = [
+  { value: 'likert', label: 'Thang Likert' },
+  { value: 'multi', label: 'Chọn nhiều đáp án' },
+  { value: 'radio', label: 'Chọn 1 đáp án' },
+  { value: 'binary', label: 'Nhị giá (Có/Không, Đúng/Sai)' },
+  { value: 'text', label: 'Nhập tự do' },
+];
+
 // ---- USER MANAGER ----
 function AdminUserManager() {
   const [users, setUsers] = useState<any[]>([]);
@@ -19,7 +28,8 @@ function AdminUserManager() {
 
   async function loadAll() {
     setLoading(true);
-    const { data: profiles } = await supabase.from('profiles').select('id, email, name, app_role');
+    // Policy phải cho phép SELECT trên profiles!
+    const { data: profiles, error: err1 } = await supabase.from('profiles').select('id, email, name, app_role');
     const { data: roundsData } = await supabase.from('rounds').select('id, round_number, status, project_id');
     const { data: participantsData } = await supabase.from('round_participants').select('id, user_id, round_id');
     const { data: projectsData } = await supabase.from('projects').select('id, title');
@@ -39,7 +49,7 @@ function AdminUserManager() {
     loadAll();
   }
 
-  // Gán user vào project
+  // Gán user vào project (role tuỳ chọn)
   async function addToProject(userId: string, projectId: string, role: string) {
     await supabase.from('permissions').upsert([
       { id: crypto.randomUUID(), user_id: userId, project_id: projectId, role }
@@ -74,7 +84,7 @@ function AdminUserManager() {
   }
 
   return (
-    <div className="max-w-5xl mx-auto py-8">
+    <div className="max-w-7xl mx-auto py-8">
       <h2 className="text-xl font-bold mb-4">👥 Danh sách người dùng</h2>
       {loading && <div>⏳ Đang tải...</div>}
       {message && <div className="mb-3 text-green-600">{message}</div>}
@@ -84,14 +94,16 @@ function AdminUserManager() {
             <th className="p-2">Email</th>
             <th className="p-2">Tên</th>
             <th className="p-2">Quyền toàn cục</th>
-            <th className="p-2">Phân quyền</th>
             <th className="p-2">Gán vào Project</th>
             <th className="p-2">Gán vào Round</th>
-            <th className="p-2">Vòng đã tham gia</th>
             <th className="p-2">Project đã tham gia</th>
+            <th className="p-2">Vòng đã tham gia</th>
           </tr>
         </thead>
         <tbody>
+          {users.length === 0 &&
+            <tr><td colSpan={7} className="text-center text-gray-400 p-8">Không có người dùng nào (kiểm tra RLS policy Supabase)</td></tr>
+          }
           {users.map(u => (
             <tr key={u.id}>
               <td className="p-2">{u.email}</td>
@@ -100,27 +112,22 @@ function AdminUserManager() {
                 <select value={u.app_role || 'viewer'} onChange={e => changeRole(u.id, e.target.value)}>
                   <option value="admin">admin</option>
                   <option value="editor">editor</option>
+                  <option value="secretary">secretary</option>
+                  <option value="core_expert">core_expert</option>
+                  <option value="external_expert">external_expert</option>
                   <option value="viewer">viewer</option>
                 </select>
               </td>
               <td className="p-2">
                 <select onChange={e => addToProject(u.id, e.target.value, 'core_expert')} defaultValue="">
-                  <option value="">Gán vào Project</option>
-                  {projects.map(p => (
-                    <option key={p.id} value={p.id}>{p.title}</option>
-                  ))}
-                </select>
-              </td>
-              <td className="p-2">
-                <select onChange={e => addToProject(u.id, e.target.value, 'core_expert')} defaultValue="">
-                  <option value="">Project</option>
+                  <option value="">Gán vào Project (core)</option>
                   {projects.map(p => (
                     <option key={p.id} value={p.id}>{p.title}</option>
                   ))}
                 </select>
                 <br/>
                 <select onChange={e => addToProject(u.id, e.target.value, 'external_expert')} defaultValue="">
-                  <option value="">Project (external)</option>
+                  <option value="">Gán vào Project (external)</option>
                   {projects.map(p => (
                     <option key={p.id} value={p.id}>{p.title}</option>
                   ))}
@@ -130,31 +137,11 @@ function AdminUserManager() {
                 <select onChange={e => addToRound(u.id, e.target.value)} defaultValue="">
                   <option value="">Gán vào Round</option>
                   {rounds.map(r =>
-                    <option key={r.id} value={r.id}>Vòng {r.round_number} (project {projects.find(p=>p.id===r.project_id)?.title || ''})</option>
+                    <option key={r.id} value={r.id}>
+                      {projects.find(p => p.id === r.project_id)?.title || ''} - Vòng {r.round_number}
+                    </option>
                   )}
                 </select>
-              </td>
-              <td className="p-2">
-                {participants.filter(p => p.user_id === u.id).length > 0
-                  ? participants
-                      .filter(p => p.user_id === u.id)
-                      .map(p => {
-                        const round = rounds.find(r => r.id === p.round_id);
-                        return round
-                          ? (
-                              <span key={p.id} className="inline-block bg-gray-100 px-2 py-1 m-1 rounded">
-                                V{round.round_number}
-                                <button
-                                  className="text-red-500 ml-1"
-                                  onClick={() => removeFromRound(p.id)}
-                                  title="Xoá khỏi round"
-                                >✕</button>
-                              </span>
-                            )
-                          : null;
-                      })
-                  : <span className="text-gray-400">-</span>
-                }
               </td>
               <td className="p-2">
                 {permissions.filter(p => p.user_id === u.id).length > 0
@@ -170,6 +157,29 @@ function AdminUserManager() {
                                   className="text-red-500 ml-1"
                                   onClick={() => removeFromProject(u.id, project.id)}
                                   title="Xoá khỏi project"
+                                >✕</button>
+                              </span>
+                            )
+                          : null;
+                      })
+                  : <span className="text-gray-400">-</span>
+                }
+              </td>
+              <td className="p-2">
+                {participants.filter(p => p.user_id === u.id).length > 0
+                  ? participants
+                      .filter(p => p.user_id === u.id)
+                      .map(p => {
+                        const round = rounds.find(r => r.id === p.round_id);
+                        const project = round && projects.find(pj => pj.id === round.project_id);
+                        return round
+                          ? (
+                              <span key={p.id} className="inline-block bg-gray-100 px-2 py-1 m-1 rounded">
+                                {project ? `${project.title} - ` : ""}V{round.round_number}
+                                <button
+                                  className="text-red-500 ml-1"
+                                  onClick={() => removeFromRound(p.id)}
+                                  title="Xoá khỏi round"
                                 >✕</button>
                               </span>
                             )
@@ -333,32 +343,68 @@ function AdminRoundManager() {
   );
 }
 
-// ---- ITEM MANAGER ----
+// ---- ITEM MANAGER (có chọn Project/Round, loại item, đáp án động) ----
 function AdminItemManager() {
   const [items, setItems] = useState<any[]>([]);
   const [rounds, setRounds] = useState<any[]>([]);
+  const [projects, setProjects] = useState<any[]>([]);
+  const [projectId, setProjectId] = useState('');
   const [roundId, setRoundId] = useState('');
   const [content, setContent] = useState('');
+  const [itemType, setItemType] = useState('likert');
+  const [options, setOptions] = useState<string[]>(['']);
   const [message, setMessage] = useState('');
 
   useEffect(() => { loadAll(); }, []);
 
   async function loadAll() {
-    const { data: itemsData } = await supabase.from('items').select('id, content, round_id');
-    const { data: roundsData } = await supabase.from('rounds').select('id, round_number');
+    const { data: itemsData } = await supabase.from('items').select('id, content, round_id, type, options');
+    const { data: roundsData } = await supabase.from('rounds').select('id, round_number, project_id');
+    const { data: projectsData } = await supabase.from('projects').select('id, title');
     setItems(itemsData || []);
     setRounds(roundsData || []);
+    setProjects(projectsData || []);
+  }
+
+  // Lọc rounds theo project chọn
+  const filteredRounds = projectId ? rounds.filter(r => r.project_id === projectId) : rounds;
+
+  function handleOptionChange(idx: number, value: string) {
+    const arr = [...options];
+    arr[idx] = value;
+    setOptions(arr);
+  }
+  function addOptionField() {
+    setOptions([...options, '']);
+  }
+  function removeOptionField(idx: number) {
+    setOptions(options.filter((_, i) => i !== idx));
+  }
+  function resetForm() {
+    setProjectId('');
+    setRoundId('');
+    setContent('');
+    setItemType('likert');
+    setOptions(['']);
   }
 
   async function createItem() {
     if (!roundId || !content) return;
+    // Chuẩn bị options tuỳ loại
+    let finalOptions: string[] | null = null;
+    if (['multi', 'radio', 'likert', 'binary'].includes(itemType)) {
+      finalOptions = options.filter(o => o.trim());
+      if (itemType === 'binary' && finalOptions.length === 0) finalOptions = ['Có', 'Không'];
+    }
     await supabase.from('items').insert({
       id: crypto.randomUUID(),
       round_id: roundId,
-      content
+      content,
+      type: itemType,
+      options: finalOptions
     });
     setMessage('✅ Đã tạo item mới!');
-    setContent('');
+    resetForm();
     loadAll();
   }
 
@@ -369,35 +415,89 @@ function AdminItemManager() {
   }
 
   return (
-    <div className="max-w-3xl mx-auto py-8">
+    <div className="max-w-4xl mx-auto py-8">
       <h2 className="text-xl font-bold mb-4">📝 Quản lý Item</h2>
       {message && <div className="mb-3 text-green-600">{message}</div>}
-      <form className="mb-4 flex flex-col gap-2">
-        <select className="border p-2" value={roundId} onChange={e=>setRoundId(e.target.value)}>
-          <option value="">Chọn Round</option>
-          {rounds.map(r=><option key={r.id} value={r.id}>Vòng {r.round_number}</option>)}
-        </select>
+      <form className="mb-4 flex flex-col gap-2 border p-4 rounded bg-gray-50">
+        <div className="flex flex-wrap gap-2">
+          <select className="border p-2" value={projectId} onChange={e => {
+            setProjectId(e.target.value);
+            setRoundId('');
+          }}>
+            <option value="">Chọn Project</option>
+            {projects.map(p => <option key={p.id} value={p.id}>{p.title}</option>)}
+          </select>
+          <select className="border p-2" value={roundId} onChange={e => setRoundId(e.target.value)}>
+            <option value="">Chọn Round</option>
+            {filteredRounds.map(r =>
+              <option key={r.id} value={r.id}>
+                {projects.find(p => p.id === r.project_id)?.title || ''} - Vòng {r.round_number}
+              </option>
+            )}
+          </select>
+          <select className="border p-2" value={itemType} onChange={e => {
+            setItemType(e.target.value);
+            // Reset options khi đổi loại
+            if (e.target.value === 'binary') setOptions(['Có', 'Không']);
+            else setOptions(['']);
+          }}>
+            {ITEM_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+          </select>
+        </div>
         <input className="border p-2" value={content} onChange={e=>setContent(e.target.value)} placeholder="Nội dung Item" />
-        <button type="button" onClick={createItem} className="bg-blue-600 text-white px-4 py-2 rounded w-fit">➕ Tạo Item</button>
+        {/* Tạo đáp án nếu không phải dạng text */}
+        {['multi', 'radio', 'likert', 'binary'].includes(itemType) &&
+          <div className="pl-2">
+            <label className="block font-semibold mb-1">Đáp án:</label>
+            {options.map((opt, idx) => (
+              <div className="flex items-center gap-2 mb-1" key={idx}>
+                <input
+                  className="border p-1 w-60"
+                  value={opt}
+                  onChange={e => handleOptionChange(idx, e.target.value)}
+                  placeholder={`Đáp án ${idx+1}`}
+                  disabled={itemType === 'binary'}
+                />
+                {options.length > 1 && itemType !== 'binary' &&
+                  <button type="button" className="text-red-500" onClick={() => removeOptionField(idx)}>✕</button>
+                }
+              </div>
+            ))}
+            {itemType !== 'binary' &&
+              <button type="button" className="text-blue-600 text-sm" onClick={addOptionField}>+ Thêm đáp án</button>
+            }
+          </div>
+        }
+        <button type="button" onClick={createItem} className="bg-blue-600 text-white px-4 py-2 rounded w-fit mt-2">➕ Tạo Item</button>
       </form>
       <table className="min-w-full border text-sm bg-white shadow">
         <thead>
           <tr className="bg-gray-100">
             <th className="p-2">Nội dung</th>
+            <th className="p-2">Project</th>
             <th className="p-2">Round</th>
+            <th className="p-2">Loại</th>
+            <th className="p-2">Đáp án</th>
             <th className="p-2">Thao tác</th>
           </tr>
         </thead>
         <tbody>
-          {items.map(i => (
-            <tr key={i.id}>
-              <td className="p-2">{i.content}</td>
-              <td className="p-2">{rounds.find(r=>r.id===i.round_id)?.round_number || ''}</td>
-              <td className="p-2">
-                <button className="text-red-500" onClick={()=>deleteItem(i.id)}>🗑️ Xóa</button>
-              </td>
-            </tr>
-          ))}
+          {items.map(i => {
+            const round = rounds.find(r=>r.id===i.round_id);
+            const project = round && projects.find(p => p.id === round.project_id);
+            return (
+              <tr key={i.id}>
+                <td className="p-2">{i.content}</td>
+                <td className="p-2">{project?.title || ""}</td>
+                <td className="p-2">{round ? `Vòng ${round.round_number}` : ''}</td>
+                <td className="p-2">{ITEM_TYPES.find(t=>t.value===i.type)?.label || i.type}</td>
+                <td className="p-2">{Array.isArray(i.options) ? i.options.join(' | ') : ""}</td>
+                <td className="p-2">
+                  <button className="text-red-500" onClick={()=>deleteItem(i.id)}>🗑️ Xóa</button>
+                </td>
+              </tr>
+            )
+          })}
         </tbody>
       </table>
     </div>
