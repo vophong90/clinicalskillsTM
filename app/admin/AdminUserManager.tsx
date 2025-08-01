@@ -48,6 +48,8 @@ export default function AdminUserManager() {
     setPermissions((permissionsData as Permission[]) ?? []);
     setParticipants((participantsData as Participant[]) ?? []);
     setResponses((responsesData as Response[]) ?? []);
+    console.log("projects:", projectsData);
+    console.log("permissions:", permissionsData);
     setLoading(false);
   }
 
