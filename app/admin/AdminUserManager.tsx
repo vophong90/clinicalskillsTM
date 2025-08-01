@@ -56,9 +56,13 @@ export default function AdminUserManager() {
   const selectedUser = users.find(u => u.id === selectedUserId) || null;
 
   // Các project user đã thuộc
-  const userProjects = permissions.filter(p => p.user_id === selectedUserId).map(p => ({
-    ...p,
-    projectTitle: projects.find(pr => pr.id === p.project_id)?.title || ''
+  const userProjects = permissions
+  .filter(p => p.user_id === selectedUserId)
+  .map(p => ({
+    permission_id: p.id,         // Sử dụng cho key của <li> và xóa
+    project_id: p.project_id,
+    title: projects.find(pr => pr.id === p.project_id)?.title || "", // Đúng key là "title"
+    role: p.role
   }));
 
   // Các round user đã tham gia
@@ -203,17 +207,17 @@ export default function AdminUserManager() {
               </select>
             </div>
             <ul className="ml-4 mt-2">
-              {userProjects.length === 0 && <li>Chưa thuộc project nào.</li>}
-              {userProjects.map(p => (
-                <li key={p.id} className="flex items-center gap-2 mb-1">
-                  <span>{p.title} <span className="italic text-gray-500">({p.role})</span></span>
-                  <button
-                    className="text-red-500 ml-2"
-                    onClick={() => removeUserFromProject(p.permission_id)}
-                  >Xóa</button>
-                </li>
-              ))}
-            </ul>
+  {userProjects.length === 0 && <li>Chưa thuộc project nào.</li>}
+  {userProjects.map(p => (
+    <li key={p.permission_id} className="flex items-center gap-2 mb-1">
+      <span>{p.title} <span className="italic text-gray-500">({p.role})</span></span>
+      <button
+        className="text-red-500 ml-2"
+        onClick={() => removeUserFromProject(p.permission_id)}
+      >Xóa</button>
+    </li>
+  ))}
+</ul>
           </div>
 
           {/* Quản lý round */}
