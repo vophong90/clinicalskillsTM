@@ -57,10 +57,10 @@ export default function Dashboard() {
       }
       const user = userData.user;
 
-      // Lấy profile theo id (bổ sung app_role)
+      // Lấy profile (id, name)
       const { data: profile, error: profileError } = await supabase
         .from('profiles')
-        .select('id, name, app_role')
+        .select('id, name')
         .eq('id', user.id)
         .maybeSingle();
 
@@ -76,20 +76,31 @@ export default function Dashboard() {
       }
 
       setName(profile.name || '');
-      setIsAdmin(profile.app_role === 'admin');
 
-      // Lấy quyền
-      const { data: permissionsData } = await supabase
+      // Lấy quyền từ bảng permissions
+      const { data: permissionsData, error: permissionsError } = await supabase
         .from('permissions')
         .select('role, project_id')
         .eq('user_id', profile.id);
 
-      if (!permissionsData || permissionsData.length === 0) {
-        setProjects([]);
+      if (permissionsError) {
+        setError('❌ Lỗi truy vấn permissions: ' + permissionsError.message);
         setLoading(false);
         return;
       }
+
+      if (!permissionsData || permissionsData.length === 0) {
+        setProjects([]);
+        setIsAdmin(false);
+        setLoading(false);
+        return;
+      }
+
       const projectIds = permissionsData.map(p => p.project_id);
+
+      // Kiểm tra user có quyền admin trong ít nhất một project
+      const isAdminRole = permissionsData.some(p => p.role === 'admin');
+      setIsAdmin(isAdminRole);
 
       // Lấy projects
       const { data: projectsData } = await supabase
@@ -129,6 +140,7 @@ export default function Dashboard() {
     <div className="min-h-screen bg-gray-50 flex flex-col items-center py-12">
       {/* Tên người dùng */}
       <div className="text-3xl font-bold text-indigo-900 mb-2">{name}</div>
+
       {/* Nút quản trị chỉ hiện nếu là admin */}
       {isAdmin && (
         <Link
@@ -138,12 +150,14 @@ export default function Dashboard() {
           🔧 Vào trang quản trị
         </Link>
       )}
+
       <button
         onClick={handleLogout}
         className="absolute top-6 right-6 px-4 py-1 rounded bg-gray-200 hover:bg-gray-300 text-gray-600 text-sm font-semibold"
       >
         Đăng xuất
       </button>
+
       <div className="w-full max-w-2xl space-y-8 mt-4">
         {projects.map((project) => (
           <div
@@ -155,17 +169,29 @@ export default function Dashboard() {
                 <span className="text-lg font-bold text-indigo-800">{project.title}</span>
                 {project.status === "active" && (
                   <span className="inline-flex items-center gap-1 px-2 py-1 rounded text-xs bg-green-50 text-green-700 font-semibold">
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={3} viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7"/>
+                    <svg
+                      className="w-4 h-4"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth={3}
+                      viewBox="0 0 24 24"
+                    >
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
                     </svg>
                   </span>
                 )}
               </div>
               {/* Role tiếng Việt */}
               <span className="inline-flex items-center gap-1 px-2 py-1 rounded text-xs bg-indigo-100 text-indigo-700 font-semibold shadow-sm">
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-                  <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2"/>
-                  <circle cx="12" cy="12" r="3" fill="currentColor"/>
+                <svg
+                  className="w-4 h-4"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth={2}
+                  viewBox="0 0 24 24"
+                >
+                  <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2" />
+                  <circle cx="12" cy="12" r="3" fill="currentColor" />
                 </svg>
                 {translateRole(project.role ?? "?")}
               </span>
@@ -175,7 +201,7 @@ export default function Dashboard() {
             <div>
               <div className="text-sm text-gray-500 mb-2">Các vòng khảo sát</div>
               {project.rounds && project.rounds.length > 0 ? (
-                project.rounds.map(round => {
+                project.rounds.map((round) => {
                   // Chỉ các role này mới được xem kết quả
                   const canViewStats = ["secretary", "viewer", "admin"].includes(project.role ?? "");
                   return (
@@ -187,8 +213,14 @@ export default function Dashboard() {
                         <span className="font-medium">Vòng {round.round_number}</span>
                         {round.status === "active" && (
                           <span className="inline-flex items-center gap-1 text-green-700 ml-1 text-sm">
-                            <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={3} viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7"/>
+                            <svg
+                              className="w-4 h-4"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth={3}
+                              viewBox="0 0 24 24"
+                            >
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
                             </svg>
                             Đang hoạt động
                           </span>
@@ -219,7 +251,7 @@ export default function Dashboard() {
                         )}
                       </div>
                     </div>
-                  )
+                  );
                 })
               ) : (
                 <div className="text-gray-400 italic text-sm">Chưa có vòng khảo sát nào</div>
