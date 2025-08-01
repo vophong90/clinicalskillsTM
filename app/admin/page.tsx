@@ -385,24 +385,33 @@ function AdminItemManager() {
     setOptions(['']);
   }
 
- async function createItem() {
+  async function createItem() {
   if (!roundId || !content) return;
   let finalOptions: string[] | null = null;
   if (['multi', 'radio', 'likert', 'binary'].includes(itemType)) {
     finalOptions = options.filter(o => o.trim());
     if (itemType === 'binary' && finalOptions.length === 0) finalOptions = ['Có', 'Không'];
   }
-
   const options_json = { choices: finalOptions ?? [] };
   const code = 'YHCT' + Math.floor(1000 + Math.random() * 9000);
+
+  // Lấy project_id từ roundId
+  const selectedRound = rounds.find(r => r.id === roundId);
+  const project_id = selectedRound ? selectedRound.project_id : null;
+  if (!project_id) {
+    setMessage('❌ Không xác định được project_id của round!');
+    return;
+  }
+
   const { error } = await supabase.from('items').insert([
     {
       id: crypto.randomUUID(),
       round_id: roundId,
-      prompt: content,       
+      project_id: project_id,     // <-- Truyền vào!
+      prompt: content,
       type: itemType,
       options_json,
-      code          
+      code,
     }
   ]);
   if (error) {
