@@ -136,7 +136,6 @@ function translateRole(role: string) {
       </div>
     </div>
   );
-}
 
 // ----------- PROJECT MANAGER ----------- //
 type Project = {
