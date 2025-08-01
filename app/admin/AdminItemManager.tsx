@@ -225,48 +225,65 @@ export default function AdminItemManager() {
         <button type="button" onClick={createItem} className="bg-blue-600 text-white px-4 py-2 rounded w-fit mt-2">➕ Tạo Item</button>
       </form>
       {loading ? <div>Đang tải...</div> :
-      <table className="min-w-full border text-sm bg-white shadow">
-        <thead>
-          <tr className="bg-gray-100">
-            <th className="p-2">STT</th>
-            <th className="p-2">Nội dung (prompt)</th>
-            <th className="p-2">Code</th>
-            <th className="p-2">Project</th>
-            <th className="p-2">Round</th>
-            <th className="p-2">Loại</th>
-            <th className="p-2">Đáp án</th>
-            <th className="p-2">Chuyển sang round tiếp theo</th>
-            <th className="p-2">Thao tác</th>
+     <table className="min-w-full border text-sm bg-white shadow">
+  <thead>
+    <tr className="bg-gray-100">
+      <th className="p-2">Thứ tự</th>
+      <th className="p-2">Nội dung (prompt)</th>
+      <th className="p-2">Code</th>
+      <th className="p-2">Project</th>
+      <th className="p-2">Round</th>
+      <th className="p-2">Loại</th>
+      <th className="p-2">Đáp án</th>
+      <th className="p-2">Chuyển round</th>
+      <th className="p-2">Thao tác</th>
+    </tr>
+  </thead>
+  <tbody>
+    {items
+      .sort((a, b) => (a.item_order || 0) - (b.item_order || 0))
+      .map((i, idx) => {
+        const round = rounds.find(r => r.id === i.round_id);
+        const project = projects.find(p => p.id === i.project_id);
+        return (
+          <tr key={i.id}>
+            {/* ----- Cột Thứ tự (Order) với input sửa trực tiếp ----- */}
+            <td className="p-2 text-center">
+              <input
+                type="number"
+                min={1}
+                value={i.item_order ?? ''}
+                style={{ width: 54 }}
+                onChange={async (e) => {
+                  const newOrder = Number(e.target.value);
+                  // Nếu giá trị mới hợp lệ, cập nhật order vào DB và reload bảng
+                  if (newOrder > 0 && newOrder !== i.item_order) {
+                    await supabase.from('items').update({ item_order: newOrder }).eq('id', i.id);
+                    await loadAll();
+                  }
+                }}
+                className="border rounded w-14 text-center"
+              />
+            </td>
+            <td className="p-2">{i.prompt}</td>
+            <td className="p-2">{i.code}</td>
+            <td className="p-2">{project?.title || ""}</td>
+            <td className="p-2">{round ? `Vòng ${round.round_number}` : ''}</td>
+            <td className="p-2">{i.type}</td>
+            <td className="p-2">{Array.isArray(i.options_json?.choices) ? i.options_json.choices.join(' | ') : ""}</td>
+            <td className="p-2">
+              <button className="bg-green-600 text-white px-2 py-1 rounded" onClick={() => cloneItemToNextRound(i)}>
+                ➡️ Chuyển sang round tiếp theo
+              </button>
+            </td>
+            <td className="p-2">
+              <button className="text-red-500" onClick={() => deleteItem(i.id)}>🗑️ Xóa</button>
+            </td>
           </tr>
-        </thead>
-        <tbody>
-          {items
-            .sort((a, b) => (a.item_order || 0) - (b.item_order || 0))
-            .map((i, idx) => {
-              const round = rounds.find(r=>r.id===i.round_id);
-              const project = projects.find(p => p.id === i.project_id);
-              return (
-                <tr key={i.id}>
-                  <td className="p-2">{i.item_order || idx+1}</td>
-                  <td className="p-2">{i.prompt}</td>
-                  <td className="p-2">{i.code}</td>
-                  <td className="p-2">{project?.title || ""}</td>
-                  <td className="p-2">{round ? `Vòng ${round.round_number}` : ''}</td>
-                  <td className="p-2">{i.type}</td>
-                  <td className="p-2">{Array.isArray(i.options_json?.choices) ? i.options_json.choices.join(' | ') : ""}</td>
-                  <td className="p-2">
-                    <button className="bg-green-600 text-white px-2 py-1 rounded" onClick={() => cloneItemToNextRound(i)}>
-                      ➡️ Chuyển sang round tiếp theo
-                    </button>
-                  </td>
-                  <td className="p-2">
-                    <button className="text-red-500" onClick={()=>deleteItem(i.id)}>🗑️ Xóa</button>
-                  </td>
-                </tr>
-              )
-          })}
-        </tbody>
-      </table>
+        )
+    })}
+  </tbody>
+</table>
       }
     </div>
   );
