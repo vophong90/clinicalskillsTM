@@ -33,18 +33,6 @@ function translateRole(role: string) {
   }
 }
 
-export default function AdminUserManager() {
-  const [users, setUsers] = useState<UserProfile[]>([]);
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [rounds, setRounds] = useState<Round[]>([]);
-  const [permissions, setPermissions] = useState<Permission[]>([]);
-  const [participants, setParticipants] = useState<Participant[]>([]);
-  const [responses, setResponses] = useState<Response[]>([]);
-  const [message, setMessage] = useState('');
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => { loadAll(); }, []);
-
   async function loadAll() {
     setLoading(true);
     const { data: profiles } = await supabase.from('profiles').select('id, email, name, role');
