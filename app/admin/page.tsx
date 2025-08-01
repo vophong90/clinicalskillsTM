@@ -104,14 +104,28 @@ function AdminProjectManager() {
   }
 
   async function createProject() {
-    if (!title) return;
-    const { error } = await supabase.from('projects').insert({ id: crypto.randomUUID(), title, status });
-    if (error) setMessage('❌ Lỗi tạo project: ' + error.message);
-    else setMessage('✅ Đã tạo Project mới!');
-    setTitle('');
-    setStatus('active');
-    await loadProjects();
+  if (!title) return;
+  // Lấy user id hiện tại
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) {
+    setMessage('❌ Bạn chưa đăng nhập!');
+    return;
   }
+  const created_by = user.id;
+  const { error } = await supabase.from('projects').insert({
+    id: crypto.randomUUID(),
+    title,
+    status,
+    created_by, // Thêm dòng này!
+  });
+  if (error) setMessage('❌ Lỗi tạo project: ' + error.message);
+  else setMessage('✅ Đã tạo Project mới!');
+  setTitle('');
+  setStatus('active');
+  await loadProjects();
+}
 
   async function deleteProject(id: string) {
     const { error } = await supabase.from('projects').delete().eq('id', id);
