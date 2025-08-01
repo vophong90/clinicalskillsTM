@@ -1,87 +1,54 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 
-// ---- CONSTANTS ----
-const ITEM_TYPES = [
-  { value: 'likert', label: 'Thang Likert' },
-  { value: 'multi', label: 'Chọn nhiều đáp án' },
-  { value: 'radio', label: 'Chọn 1 đáp án' },
-  { value: 'binary', label: 'Nhị giá (Có/Không, Đúng/Sai)' },
-  { value: 'text', label: 'Nhập tự do' },
-];
+// ----------- TYPE KHAI BÁO ----------- //
+type Item = {
+  id: string;
+  round_id: string;
+  project_id: string;
+  prompt: string;
+  type: string;
+  options_json: { choices: string[] };
+  code: string;
+  item_order?: number;
+  original_item_id?: string | null;
+};
+type Round = { id: string; round_number: number; project_id: string; status?: string };
+type Project = { id: string; title: string; status?: string };
+type UserProfile = {
+  id: string;
+  email: string;
+  name: string;
+  role: string;
+};
 
-// ---- USER MANAGER ----
+// ----------- USER MANAGER ----------- //
 function AdminUserManager() {
-  const [users, setUsers] = useState<any[]>([]);
-  const [rounds, setRounds] = useState<any[]>([]);
-  const [participants, setParticipants] = useState<any[]>([]);
-  const [projects, setProjects] = useState<any[]>([]);
-  const [permissions, setPermissions] = useState<any[]>([]);
+  const [users, setUsers] = useState<UserProfile[]>([]);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState('');
 
-  useEffect(() => {
-    loadAll();
-    supabase.auth.getUser().then(({ data }) => {
-      console.log("User id FE đang login:", data.user?.id);
-    });
-  }, []);
+  useEffect(() => { loadUsers(); }, []);
 
-  async function loadAll() {
+  async function loadUsers() {
     setLoading(true);
-    const { data: profiles } = await supabase.from('profiles').select('id, email, name, role');
-    const { data: roundsData } = await supabase.from('rounds').select('id, round_number, status, project_id');
-    const { data: participantsData } = await supabase.from('round_participants').select('id, user_id, round_id');
-    const { data: projectsData } = await supabase.from('projects').select('id, title');
-    const { data: permissionsData } = await supabase.from('permissions').select('id, user_id, project_id, role');
-    setUsers(profiles || []);
-    setRounds(roundsData || []);
-    setParticipants(participantsData || []);
-    setProjects(projectsData || []);
-    setPermissions(permissionsData || []);
+    const { data, error } = await supabase.from('profiles').select('id, email, name, role');
+    if (error) setMessage('❌ Lỗi khi load user: ' + error.message);
+    setUsers((data as UserProfile[]) ?? []);
     setLoading(false);
   }
 
   async function changeRole(userId: string, newRole: string) {
-    await supabase.from('profiles').update({ role: newRole }).eq('id', userId);
-    setMessage('✅ Đã cập nhật quyền!');
-    loadAll();
-  }
-
-  async function addToProject(userId: string, projectId: string, role: string) {
-    await supabase.from('permissions').upsert([
-      { id: crypto.randomUUID(), user_id: userId, project_id: projectId, role }
-    ], { onConflict:'user_id,project_id'});
-    setMessage('✅ Đã gán user vào project!');
-    loadAll();
-  }
-
-  async function addToRound(userId: string, roundId: string) {
-    await supabase.from('round_participants').insert({
-      id: crypto.randomUUID(),
-      round_id: roundId,
-      user_id: userId
-    });
-    setMessage('✅ Đã thêm vào round!');
-    loadAll();
-  }
-
-  async function removeFromRound(participantId: string) {
-    await supabase.from('round_participants').delete().eq('id', participantId);
-    setMessage('✅ Đã xoá user khỏi round!');
-    loadAll();
-  }
-
-  async function removeFromProject(userId: string, projectId: string) {
-    await supabase.from('permissions').delete().eq('user_id', userId).eq('project_id', projectId);
-    setMessage('✅ Đã xoá user khỏi project!');
-    loadAll();
+    const { error } = await supabase.from('profiles').update({ role: newRole }).eq('id', userId);
+    if (error) setMessage('❌ Lỗi cập nhật quyền: ' + error.message);
+    else setMessage('✅ Đã cập nhật quyền!');
+    await loadUsers();
   }
 
   return (
-    <div className="max-w-7xl mx-auto py-8">
+    <div className="max-w-3xl mx-auto py-8">
       <h2 className="text-xl font-bold mb-4">👥 Danh sách người dùng</h2>
       {loading && <div>⏳ Đang tải...</div>}
       {message && <div className="mb-3 text-green-600">{message}</div>}
@@ -90,16 +57,12 @@ function AdminUserManager() {
           <tr className="bg-gray-100">
             <th className="p-2">Email</th>
             <th className="p-2">Tên</th>
-            <th className="p-2">Quyền toàn cục</th>
-            <th className="p-2">Gán vào Project</th>
-            <th className="p-2">Gán vào Round</th>
-            <th className="p-2">Project đã tham gia</th>
-            <th className="p-2">Vòng đã tham gia</th>
+            <th className="p-2">Quyền</th>
           </tr>
         </thead>
         <tbody>
           {users.length === 0 &&
-            <tr><td colSpan={7} className="text-center text-gray-400 p-8">Không có người dùng nào (kiểm tra RLS policy Supabase)</td></tr>
+            <tr><td colSpan={3} className="text-center text-gray-400 p-8">Không có người dùng nào</td></tr>
           }
           {users.map(u => (
             <tr key={u.id}>
@@ -115,76 +78,6 @@ function AdminUserManager() {
                   <option value="viewer">viewer</option>
                 </select>
               </td>
-              <td className="p-2">
-                <select onChange={e => addToProject(u.id, e.target.value, 'core_expert')} defaultValue="">
-                  <option value="">Gán vào Project (core)</option>
-                  {projects.map(p => (
-                    <option key={p.id} value={p.id}>{p.title}</option>
-                  ))}
-                </select>
-                <br/>
-                <select onChange={e => addToProject(u.id, e.target.value, 'external_expert')} defaultValue="">
-                  <option value="">Gán vào Project (external)</option>
-                  {projects.map(p => (
-                    <option key={p.id} value={p.id}>{p.title}</option>
-                  ))}
-                </select>
-              </td>
-              <td className="p-2">
-                <select onChange={e => addToRound(u.id, e.target.value)} defaultValue="">
-                  <option value="">Gán vào Round</option>
-                  {rounds.map(r =>
-                    <option key={r.id} value={r.id}>
-                      {projects.find(p => p.id === r.project_id)?.title || ''} - Vòng {r.round_number}
-                    </option>
-                  )}
-                </select>
-              </td>
-              <td className="p-2">
-                {permissions.filter(p => p.user_id === u.id).length > 0
-                  ? permissions
-                      .filter(p => p.user_id === u.id)
-                      .map(p => {
-                        const project = projects.find(pr => pr.id === p.project_id);
-                        return project
-                          ? (
-                              <span key={p.id} className="inline-block bg-gray-100 px-2 py-1 m-1 rounded">
-                                {project.title}
-                                <button
-                                  className="text-red-500 ml-1"
-                                  onClick={() => removeFromProject(u.id, project.id)}
-                                  title="Xoá khỏi project"
-                                >✕</button>
-                              </span>
-                            )
-                          : null;
-                      })
-                  : <span className="text-gray-400">-</span>
-                }
-              </td>
-              <td className="p-2">
-                {participants.filter(p => p.user_id === u.id).length > 0
-                  ? participants
-                      .filter(p => p.user_id === u.id)
-                      .map(p => {
-                        const round = rounds.find(r => r.id === p.round_id);
-                        const project = round && projects.find(pj => pj.id === round.project_id);
-                        return round
-                          ? (
-                              <span key={p.id} className="inline-block bg-gray-100 px-2 py-1 m-1 rounded">
-                                {project ? `${project.title} - ` : ""}V{round.round_number}
-                                <button
-                                  className="text-red-500 ml-1"
-                                  onClick={() => removeFromRound(p.id)}
-                                  title="Xoá khỏi round"
-                                >✕</button>
-                              </span>
-                            )
-                          : null;
-                      })
-                  : <span className="text-gray-400">-</span>
-                }
-              </td>
             </tr>
           ))}
         </tbody>
@@ -193,9 +86,9 @@ function AdminUserManager() {
   );
 }
 
-// ---- PROJECT MANAGER ----
+// ----------- PROJECT MANAGER ----------- //
 function AdminProjectManager() {
-  const [projects, setProjects] = useState<any[]>([]);
+  const [projects, setProjects] = useState<Project[]>([]);
   const [title, setTitle] = useState('');
   const [status, setStatus] = useState('active');
   const [message, setMessage] = useState('');
@@ -206,23 +99,25 @@ function AdminProjectManager() {
   async function loadProjects() {
     setLoading(true);
     const { data } = await supabase.from('projects').select('id, title, status');
-    setProjects(data || []);
+    setProjects((data as Project[]) ?? []);
     setLoading(false);
   }
 
   async function createProject() {
     if (!title) return;
-    await supabase.from('projects').insert({ id: crypto.randomUUID(), title, status });
-    setMessage('✅ Đã tạo Project mới!');
+    const { error } = await supabase.from('projects').insert({ id: crypto.randomUUID(), title, status });
+    if (error) setMessage('❌ Lỗi tạo project: ' + error.message);
+    else setMessage('✅ Đã tạo Project mới!');
     setTitle('');
     setStatus('active');
-    loadProjects();
+    await loadProjects();
   }
 
   async function deleteProject(id: string) {
-    await supabase.from('projects').delete().eq('id', id);
-    setMessage('🗑️ Đã xóa Project!');
-    loadProjects();
+    const { error } = await supabase.from('projects').delete().eq('id', id);
+    if (error) setMessage('❌ Lỗi xóa: ' + error.message);
+    else setMessage('🗑️ Đã xóa Project!');
+    await loadProjects();
   }
 
   return (
@@ -262,10 +157,10 @@ function AdminProjectManager() {
   );
 }
 
-// ---- ROUND MANAGER ----
+// ----------- ROUND MANAGER ----------- //
 function AdminRoundManager() {
-  const [rounds, setRounds] = useState<any[]>([]);
-  const [projects, setProjects] = useState<any[]>([]);
+  const [rounds, setRounds] = useState<Round[]>([]);
+  const [projects, setProjects] = useState<Project[]>([]);
   const [projectId, setProjectId] = useState('');
   const [number, setNumber] = useState(1);
   const [status, setStatus] = useState('active');
@@ -275,27 +170,29 @@ function AdminRoundManager() {
 
   async function loadAll() {
     const { data: roundsData } = await supabase.from('rounds').select('id, project_id, round_number, status');
+    setRounds((roundsData as Round[]) ?? []);
     const { data: projectsData } = await supabase.from('projects').select('id, title');
-    setRounds(roundsData || []);
-    setProjects(projectsData || []);
+    setProjects((projectsData as Project[]) ?? []);
   }
 
   async function createRound() {
     if (!projectId) return;
-    await supabase.from('rounds').insert({
+    const { error } = await supabase.from('rounds').insert({
       id: crypto.randomUUID(),
       project_id: projectId,
       round_number: number,
       status
     });
-    setMessage('✅ Đã tạo round mới!');
-    loadAll();
+    if (error) setMessage('❌ Lỗi tạo round: ' + error.message);
+    else setMessage('✅ Đã tạo round mới!');
+    await loadAll();
   }
 
   async function deleteRound(id: string) {
-    await supabase.from('rounds').delete().eq('id', id);
-    setMessage('🗑️ Đã xóa round!');
-    loadAll();
+    const { error } = await supabase.from('rounds').delete().eq('id', id);
+    if (error) setMessage('❌ Lỗi xóa round: ' + error.message);
+    else setMessage('🗑️ Đã xóa round!');
+    await loadAll();
   }
 
   return (
@@ -339,32 +236,16 @@ function AdminRoundManager() {
     </div>
   );
 }
-
-// ---- ITEM MANAGER ----
-type Item = {
-  id: string;
-  round_id: string;
-  project_id: string;
-  prompt: string;
-  type: string;
-  options_json: { choices: string[] };
-  code: string;
-  item_order?: number;
-  original_item_id?: string | null;
-};
-
-type Round = { id: string; round_number: number; project_id: string; };
-type Project = { id: string; title: string; };
-
+// ----------- ITEM MANAGER ----------- //
 function AdminItemManager() {
-  const [items, setItems] = useState([]);
-  const [rounds, setRounds] = useState([]);
-  const [projects, setProjects] = useState([]);
+  const [items, setItems] = useState<Item[]>([]);
+  const [rounds, setRounds] = useState<Round[]>([]);
+  const [projects, setProjects] = useState<Project[]>([]);
   const [projectId, setProjectId] = useState('');
   const [roundId, setRoundId] = useState('');
   const [content, setContent] = useState('');
   const [itemType, setItemType] = useState('multi');
-  const [options, setOptions] = useState(['']);
+  const [options, setOptions] = useState<string[]>(['']);
   const [itemOrder, setItemOrder] = useState('');
   const [message, setMessage] = useState('');
   const [loading, setLoading] = useState(true);
@@ -376,15 +257,15 @@ function AdminItemManager() {
     const { data: itemsData, error: itemErr } = await supabase.from('items')
       .select('id, round_id, project_id, prompt, type, options_json, code, item_order, original_item_id');
     if (itemErr) setMessage('❌ Lỗi khi load item: ' + itemErr.message);
-    setItems(itemsData || []);
+    setItems((itemsData as Item[]) ?? []);
     const { data: roundsData } = await supabase.from('rounds').select('id, round_number, project_id');
-    setRounds(roundsData || []);
+    setRounds((roundsData as Round[]) ?? []);
     const { data: projectsData } = await supabase.from('projects').select('id, title');
-    setProjects(projectsData || []);
+    setProjects((projectsData as Project[]) ?? []);
     setLoading(false);
   }
 
-  function handleOptionChange(idx, value) {
+  function handleOptionChange(idx: number, value: string) {
     const arr = [...options];
     arr[idx] = value;
     setOptions(arr);
@@ -392,7 +273,7 @@ function AdminItemManager() {
   function addOptionField() {
     setOptions([...options, '']);
   }
-  function removeOptionField(idx) {
+  function removeOptionField(idx: number) {
     setOptions(options.filter((_, i) => i !== idx));
   }
   function resetForm() {
@@ -404,12 +285,11 @@ function AdminItemManager() {
     setItemOrder('');
   }
 
-  // Chỉ lọc round theo project nếu chọn
   const filteredRounds = projectId ? rounds.filter(r => r.project_id === projectId) : rounds;
 
   async function createItem() {
     if (!roundId || !content) return;
-    let finalOptions = null;
+    let finalOptions: string[] | null = null;
     if (['multi', 'radio', 'likert', 'binary'].includes(itemType)) {
       finalOptions = options.filter(o => o.trim());
       if (itemType === 'binary' && finalOptions.length === 0) finalOptions = ['Có', 'Không'];
@@ -417,7 +297,6 @@ function AdminItemManager() {
     const options_json = { choices: finalOptions ?? [] };
     const code = 'YHCT' + Math.floor(1000 + Math.random() * 9000);
 
-    // Lấy project_id từ roundId
     const selectedRound = rounds.find(r => r.id === roundId);
     const project_id = selectedRound ? selectedRound.project_id : null;
     if (!project_id) {
@@ -425,10 +304,8 @@ function AdminItemManager() {
       return;
     }
 
-    // Lấy giá trị item_order do người dùng nhập, hoặc tự động tăng cuối danh sách
     let item_order = itemOrder ? parseInt(itemOrder, 10) : undefined;
     if (!item_order) {
-      // Lấy số item hiện tại của round, tự tăng cuối danh sách
       const { count } = await supabase
         .from('items')
         .select('id', { count: 'exact', head: true })
@@ -458,20 +335,18 @@ function AdminItemManager() {
     await loadAll();
   }
 
-  async function deleteItem(id) {
+  async function deleteItem(id: string) {
     await supabase.from('items').delete().eq('id', id);
     setMessage('🗑️ Đã xóa item!');
     await loadAll();
   }
 
-  // Hàm clone sang round tiếp theo (có gán lại thứ tự cuối cùng)
-  async function cloneItemToNextRound(item) {
+  async function cloneItemToNextRound(item: Item) {
     const currentRound = rounds.find(r => r.id === item.round_id);
     if (!currentRound) {
       setMessage('Không tìm thấy round hiện tại!');
       return;
     }
-    // Tìm round kế tiếp
     const nextRound = rounds
       .filter(r => r.project_id === currentRound.project_id && r.round_number > currentRound.round_number)
       .sort((a, b) => a.round_number - b.round_number)[0];
@@ -480,7 +355,6 @@ function AdminItemManager() {
       setMessage('❌ Không có round kế tiếp trong project này!');
       return;
     }
-    // Tìm số thứ tự cuối cùng của round mới
     const { count } = await supabase
       .from('items')
       .select('id', { count: 'exact', head: true })
@@ -500,7 +374,7 @@ function AdminItemManager() {
         original_item_id: item.original_item_id || item.id,
       }
     ]);
-    setMessage('✅ Đã clone item sang round kế tiếp!');
+    setMessage('✅ Đã clone item sang round tiếp theo!');
     await loadAll();
   }
 
@@ -618,10 +492,9 @@ function AdminItemManager() {
   );
 }
 
-// ---- MAIN ADMIN PAGE ----
+// ------------- MAIN ADMIN PAGE -------------
 export default function AdminPage() {
-  const [tab, setTab] = useState<'users'|'projects'|'rounds'|'items'>('users');
-
+  const [tab, setTab] = useState<'users'|'projects'|'rounds'|'items'>('items');
   return (
     <div className="flex min-h-screen">
       {/* Sidebar */}
