@@ -412,6 +412,15 @@ function AdminItemManager() {
   }
 
   // --------- CHỨC NĂNG CLONE ITEM SANG ROUND TIẾP THEO CỦA PROJECT -----------
+  interface ItemType {
+  id: string;
+  round_id: string;
+  content: string;
+  type: string;
+  options?: string[] | null;
+  original_item_id?: string | null;
+}
+
   async function cloneItemToNextRound(item) {
     // Lấy round hiện tại
     const currentRound = rounds.find(r => r.id === item.round_id);
