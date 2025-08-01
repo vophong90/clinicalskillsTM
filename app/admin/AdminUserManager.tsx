@@ -224,3 +224,4 @@ function renderUserDetail(userId: string) {
     </div>
   );
 }
+}
