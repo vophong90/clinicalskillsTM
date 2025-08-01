@@ -421,7 +421,7 @@ function AdminItemManager() {
   original_item_id?: string | null;
 }
 
-  async function cloneItemToNextRound(item) {
+  async function cloneItemToNextRound(item: ItemType) {
     // Lấy round hiện tại
     const currentRound = rounds.find(r => r.id === item.round_id);
     if (!currentRound) {
