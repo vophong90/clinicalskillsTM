@@ -127,7 +127,7 @@ export default function Dashboard() {
       {isAdmin && (
         <Link
           href="/admin"
-          className="text-sm text-blue-600 underline hover:text-blue-800 mb-2"
+          className="inline-block mb-3 px-3 py-1 bg-blue-100 text-blue-700 rounded-full font-semibold shadow hover:bg-blue-200 transition"
         >
           🔧 Vào trang quản trị
         </Link>
