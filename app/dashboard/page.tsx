@@ -37,6 +37,7 @@ function translateRole(roleId: string) {
 export default function Dashboard() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [name, setName] = useState<string>('');
+  const [isAdmin, setIsAdmin] = useState<boolean>(false);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -56,17 +57,20 @@ export default function Dashboard() {
       }
 
       // Lấy profile theo id
-      const { data: profile, error: profileError } = await supabase
+     const { data: profile, error: profileError } = await supabase
         .from('profiles')
-        .select('id, name')
+        .select('id, name, app_role')
         .eq('id', user.id)
         .maybeSingle();
-      if (!profile) {
-        setError('❌ Không tìm thấy profile cho user hiện tại.');
-        setLoading(false);
+
+     if (!profile) {
+         setError('❌ Không tìm thấy profile cho user hiện tại.');
+         setLoading(false);
         return;
       }
-      setName(profile.name);
+
+     setName(profile.name);
+     setIsAdmin(profile.app_role === 'admin');
 
       // Lấy quyền
       const { data: permissionsData, error: permissionsError } = await supabase
@@ -119,6 +123,14 @@ export default function Dashboard() {
   <div className="min-h-screen bg-gray-50 flex flex-col items-center py-12">
     {/* Tên người dùng */}
     <div className="text-3xl font-bold text-indigo-900 mb-2">{name}</div>
+    {isAdmin && (
+    <Link
+    href="/admin"
+    className="text-sm text-blue-600 underline hover:text-blue-800 mb-2"
+    >
+    🔧 Vào trang quản trị
+   </Link>
+   )}
     <button onClick={handleLogout} className="absolute top-6 right-6 px-4 py-1 rounded bg-gray-200 hover:bg-gray-300 text-gray-600 text-sm font-semibold">
       Đăng xuất
     </button>
