@@ -37,6 +37,7 @@ function translateRole(roleId: string) {
 export default function Dashboard() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [name, setName] = useState<string>('');
+  const [isAdmin, setIsAdmin] = useState<boolean>(false);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -55,10 +56,10 @@ export default function Dashboard() {
         return;
       }
 
-      // Lấy profile theo id
+      // Lấy profile theo id (bổ sung app_role)
       const { data: profile, error: profileError } = await supabase
         .from('profiles')
-        .select('id, name')
+        .select('id, name, app_role')
         .eq('id', user.id)
         .maybeSingle();
 
@@ -69,6 +70,7 @@ export default function Dashboard() {
       }
 
       setName(profile.name);
+      setIsAdmin(profile.app_role === 'admin');
 
       // Lấy quyền
       const { data: permissionsData } = await supabase
@@ -121,6 +123,15 @@ export default function Dashboard() {
     <div className="min-h-screen bg-gray-50 flex flex-col items-center py-12">
       {/* Tên người dùng */}
       <div className="text-3xl font-bold text-indigo-900 mb-2">{name}</div>
+      {/* Nút quản trị chỉ hiện nếu là admin */}
+      {isAdmin && (
+        <Link
+          href="/admin"
+          className="inline-block mb-3 px-3 py-1 bg-blue-100 text-blue-700 rounded-full font-semibold shadow hover:bg-blue-200 transition"
+        >
+          🔧 Vào trang quản trị
+        </Link>
+      )}
       <button onClick={handleLogout} className="absolute top-6 right-6 px-4 py-1 rounded bg-gray-200 hover:bg-gray-300 text-gray-600 text-sm font-semibold">
         Đăng xuất
       </button>
