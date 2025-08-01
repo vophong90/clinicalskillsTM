@@ -69,12 +69,12 @@ function AdminUserManager() {
               <td className="p-2">{u.name}</td>
               <td className="p-2">
                 <select value={u.role || 'viewer'} onChange={e => changeRole(u.id, e.target.value)}>
-                  <option value="admin">admin</option>
+                  <option value="Quản trị viên">admin</option>
                   <option value="editor">editor</option>
-                  <option value="secretary">secretary</option>
-                  <option value="core_expert">core_expert</option>
-                  <option value="external_expert">external_expert</option>
-                  <option value="viewer">viewer</option>
+                  <option value="Thư ký hội đồng">secretary</option>
+                  <option value="Chuyên gia nòng cốt">core_expert</option>
+                  <option value="Chuyên gia bên ngoài">external_expert</option>
+                  <option value="Quan sát viên">viewer</option>
                 </select>
               </td>
             </tr>
