@@ -356,10 +356,6 @@ type Item = {
 type Round = { id: string; round_number: number; project_id: string; };
 type Project = { id: string; title: string; };
 
-const [items, setItems] = useState<Item[]>([]);
-const [rounds, setRounds] = useState<Round[]>([]);
-const [projects, setProjects] = useState<Project[]>([]);
-
 function AdminItemManager() {
   const [items, setItems] = useState([]);
   const [rounds, setRounds] = useState([]);
