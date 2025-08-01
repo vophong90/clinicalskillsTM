@@ -111,3 +111,99 @@ export default function AdminUserPanel() {
     </div>
   );
 }
+
+// --- BẮT ĐẦU PHẦN QUẢN LÝ USER ---
+function AdminUserManager() {
+  const [users, setUsers] = useState<any[]>([]);
+  const [rounds, setRounds] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [message, setMessage] = useState('');
+
+  useEffect(() => {
+    loadAll();
+  }, []);
+
+  async function loadAll() {
+    setLoading(true);
+    // Lấy danh sách user + profile
+    const { data: profiles } = await supabase.from('profiles').select('id, email, name, app_role');
+    // Lấy rounds
+    const { data: roundsData } = await supabase.from('rounds').select('id, round_number, status');
+    setUsers(profiles || []);
+    setRounds(roundsData || []);
+    setLoading(false);
+  }
+
+  // Đổi quyền user
+  async function changeRole(userId: string, newRole: string) {
+    await supabase.from('profiles').update({ app_role: newRole }).eq('id', userId);
+    setMessage('✅ Đã cập nhật quyền!');
+    loadAll();
+  }
+
+  // Thêm user vào round
+  async function addToRound(userId: string, roundId: string) {
+    await supabase.from('round_participants').insert({
+      id: crypto.randomUUID(),
+      round_id: roundId,
+      user_id: userId
+    });
+    setMessage('✅ Đã thêm vào round!');
+    loadAll();
+  }
+
+  return (
+    <div className="max-w-4xl mx-auto py-8">
+      <h2 className="text-xl font-bold mb-4">👥 Danh sách người dùng</h2>
+      {loading && <div>⏳ Đang tải...</div>}
+      {message && <div className="mb-3 text-green-600">{message}</div>}
+      <table className="min-w-full border text-sm bg-white shadow">
+        <thead>
+          <tr className="bg-gray-100">
+            <th className="p-2">Email</th>
+            <th className="p-2">Tên</th>
+            <th className="p-2">Quyền</th>
+            <th className="p-2">Phân quyền</th>
+            <th className="p-2">Thêm vào round</th>
+          </tr>
+        </thead>
+        <tbody>
+          {users.map(u => (
+            <tr key={u.id}>
+              <td className="p-2">{u.email}</td>
+              <td className="p-2">{u.name}</td>
+              <td className="p-2">{u.app_role}</td>
+              <td className="p-2">
+                <select value={u.app_role || 'viewer'} onChange={e => changeRole(u.id, e.target.value)}>
+                  <option value="admin">admin</option>
+                  <option value="editor">editor</option>
+                  <option value="viewer">viewer</option>
+                </select>
+              </td>
+              <td className="p-2">
+                <select onChange={e => addToRound(u.id, e.target.value)} defaultValue="">
+                  <option value="">Chọn round</option>
+                  {rounds.map(r =>
+                    <option key={r.id} value={r.id}>Vòng {r.round_number} ({r.status})</option>
+                  )}
+                </select>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// --- ĐOẠN EXPORT CHÍNH ---
+// Kết hợp cả hai thành phần vào 1 trang
+export default function AdminPage() {
+  return (
+    <div>
+      <AdminUserPanel />
+      <hr className="my-8" />
+      <AdminUserManager />
+    </div>
+  );
+}
