@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
-import { v4 as uuidv4 } from 'uuid';
 
 export default function AdminUserPanel() {
   const [email, setEmail] = useState('');
@@ -44,7 +43,7 @@ export default function AdminUserPanel() {
 
     if (selectedRound) {
       await supabase.from('round_participants').insert({
-        id: uuidv4(),
+        id: crypto.randomUUID(),
         round_id: selectedRound,
         user_id: user_id,
         invited_by: null // sửa sau nếu có current admin
