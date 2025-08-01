@@ -16,7 +16,6 @@ type Item = {
   original_item_id?: string | null;
 };
 type Round = { id: string; round_number: number; project_id: string; status?: string };
-type Project = { id: string; title: string; status?: string };
 type UserProfile = {
   id: string;
   email: string;
