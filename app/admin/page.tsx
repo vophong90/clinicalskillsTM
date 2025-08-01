@@ -43,7 +43,7 @@ function AdminUserManager() {
   async function addToProject(userId: string, projectId: string, role: string) {
     await supabase.from('permissions').upsert([
       { id: crypto.randomUUID(), user_id: userId, project_id: projectId, role }
-    ], { onConflict: ['user_id', 'project_id'] });
+    ], { onConflict:'user_id,project_id'});
     setMessage('✅ Đã gán user vào project!');
     loadAll();
   }
