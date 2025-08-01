@@ -1,26 +1,13 @@
-'use client';
-
 import React, { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 
-// ----------- TYPE KHAI BÁO ----------- //
-type Item = {
-  id: string;
-  round_id: string;
-  project_id: string;
-  prompt: string;
-  type: string;
-  options_json: { choices: string[] };
-  code: string;
-  item_order?: number;
-  original_item_id?: string | null;
-};
-type Round = { id: string; round_number: number; project_id: string; status?: string };
-type UserProfile = { id: string; email: string; name: string; role: string};
+type UserProfile = { id: string; email: string; name: string; role: string };
+type Project = { id: string; title: string };
+type Round = { id: string; project_id: string; round_number: number };
 type Permission = { id: string; user_id: string; project_id: string; role: string };
-type Response = { id: string; round_id: string; item_id: string; user_id: string };
+type Participant = { id: string; user_id: string; round_id: string };
+type Response = { id: string; user_id: string; round_id: string };
 
-// ----------- USER MANAGER ----------- //
 function translateRole(role: string) {
   switch (role) {
     case "admin": return "Quản trị viên";
@@ -33,6 +20,18 @@ function translateRole(role: string) {
   }
 }
 
+function AdminUserManager() {
+  // State
+  const [users, setUsers] = useState<UserProfile[]>([]);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [rounds, setRounds] = useState<Round[]>([]);
+  const [permissions, setPermissions] = useState<Permission[]>([]);
+  const [participants, setParticipants] = useState<Participant[]>([]);
+  const [responses, setResponses] = useState<Response[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [message, setMessage] = useState<string>("");
+
+  // Load data
   async function loadAll() {
     setLoading(true);
     const { data: profiles } = await supabase.from('profiles').select('id, email, name, role');
@@ -50,6 +49,10 @@ function translateRole(role: string) {
     setResponses((responsesData as Response[]) ?? []);
     setLoading(false);
   }
+
+  useEffect(() => {
+    loadAll();
+  }, []);
 
   async function changeRole(userId: string, newRole: string) {
     const { error } = await supabase.from('profiles').update({ role: newRole }).eq('id', userId);
@@ -136,6 +139,7 @@ function translateRole(role: string) {
       </div>
     </div>
   );
+}
 
 // ----------- PROJECT MANAGER ----------- //
 type Project = {
