@@ -341,6 +341,25 @@ function AdminRoundManager() {
 }
 
 // ---- ITEM MANAGER ----
+type Item = {
+  id: string;
+  round_id: string;
+  project_id: string;
+  prompt: string;
+  type: string;
+  options_json: { choices: string[] };
+  code: string;
+  item_order?: number;
+  original_item_id?: string | null;
+};
+
+type Round = { id: string; round_number: number; project_id: string; };
+type Project = { id: string; title: string; };
+
+const [items, setItems] = useState<Item[]>([]);
+const [rounds, setRounds] = useState<Round[]>([]);
+const [projects, setProjects] = useState<Project[]>([]);
+
 function AdminItemManager() {
   const [items, setItems] = useState([]);
   const [rounds, setRounds] = useState([]);
