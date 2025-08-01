@@ -385,25 +385,34 @@ function AdminItemManager() {
     setOptions(['']);
   }
 
-  async function createItem() {
-    if (!roundId || !content) return;
-    let finalOptions: string[] | null = null;
-    if (['multi', 'radio', 'likert', 'binary'].includes(itemType)) {
-      finalOptions = options.filter(o => o.trim());
-      if (itemType === 'binary' && finalOptions.length === 0) finalOptions = ['Có', 'Không'];
-    }
-    await supabase.from('items').insert({
+ async function createItem() {
+  if (!roundId || !content) return;
+  let finalOptions: string[] | null = null;
+  if (['multi', 'radio', 'likert', 'binary'].includes(itemType)) {
+    finalOptions = options.filter(o => o.trim());
+    if (itemType === 'binary' && finalOptions.length === 0) finalOptions = ['Có', 'Không'];
+  }
+
+  const options_json = { choices: finalOptions ?? [] };
+  const code = 'YHCT' + Math.floor(1000 + Math.random() * 9000);
+  const { error } = await supabase.from('items').insert([
+    {
       id: crypto.randomUUID(),
       round_id: roundId,
-      content,
+      prompt: content,       
       type: itemType,
-      options: finalOptions,
-      original_item_id: null // Bản gốc sẽ tự động cập nhật sau, hoặc dùng trigger
-    });
-    setMessage('✅ Đã tạo item mới!');
-    resetForm();
-    loadAll();
+      options_json,
+      code          
+    }
+  ]);
+  if (error) {
+    setMessage('❌ Lỗi khi tạo item: ' + error.message);
+    return;
   }
+  setMessage('✅ Đã tạo item mới!');
+  resetForm();
+  await loadAll();
+}
 
   async function deleteItem(id: string) {
     await supabase.from('items').delete().eq('id', id);
