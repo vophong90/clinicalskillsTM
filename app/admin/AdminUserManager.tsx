@@ -110,6 +110,9 @@ export default function AdminUserManager() {
       title: projects.find(pr => pr.id === p.project_id)?.title || "",
       role: p.role
     }));
+  console.log("selectedUserId:", selectedUserId);
+console.log("permissions:", permissions);
+console.log("userProjects:", userProjects);
 
   // Các round đã tham gia
   const userRounds = participants
