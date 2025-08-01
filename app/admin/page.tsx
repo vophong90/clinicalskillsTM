@@ -32,7 +32,7 @@ function AdminUserManager() {
   async function loadAll() {
     setLoading(true);
     // Policy phải cho phép SELECT trên profiles!
-    const { data: profiles, error: err1 } = await supabase.from('profiles').select('id, email, name, app_role');
+    const { data: profiles, error: err1 } = await supabase.from('profiles').select('id, email, name, role');
     const { data: roundsData } = await supabase.from('rounds').select('id, round_number, status, project_id');
     const { data: participantsData } = await supabase.from('round_participants').select('id, user_id, round_id');
     const { data: projectsData } = await supabase.from('projects').select('id, title');
@@ -47,7 +47,7 @@ function AdminUserManager() {
 
   // Đổi quyền user (toàn cục)
   async function changeRole(userId: string, newRole: string) {
-    await supabase.from('profiles').update({ app_role: newRole }).eq('id', userId);
+    await supabase.from('profiles').update({ role: newRole }).eq('id', userId);
     setMessage('✅ Đã cập nhật quyền!');
     loadAll();
   }
