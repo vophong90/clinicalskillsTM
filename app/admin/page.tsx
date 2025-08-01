@@ -340,33 +340,36 @@ function AdminRoundManager() {
   );
 }
 
-// ---- ITEM MANAGER (CÓ CLONE ITEM SANG ROUND TIẾP THEO) ----
+// ---- ITEM MANAGER ----
 function AdminItemManager() {
-  const [items, setItems] = useState<any[]>([]);
-  const [rounds, setRounds] = useState<any[]>([]);
-  const [projects, setProjects] = useState<any[]>([]);
+  const [items, setItems] = useState([]);
+  const [rounds, setRounds] = useState([]);
+  const [projects, setProjects] = useState([]);
   const [projectId, setProjectId] = useState('');
   const [roundId, setRoundId] = useState('');
   const [content, setContent] = useState('');
-  const [itemType, setItemType] = useState('likert');
-  const [options, setOptions] = useState<string[]>(['']);
+  const [itemType, setItemType] = useState('multi');
+  const [options, setOptions] = useState(['']);
+  const [itemOrder, setItemOrder] = useState('');
   const [message, setMessage] = useState('');
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => { loadAll(); }, []);
 
   async function loadAll() {
-    const { data: itemsData } = await supabase.from('items').select('id, content, round_id, type, options, original_item_id');
-    const { data: roundsData } = await supabase.from('rounds').select('id, round_number, project_id');
-    const { data: projectsData } = await supabase.from('projects').select('id, title');
+    setLoading(true);
+    const { data: itemsData, error: itemErr } = await supabase.from('items')
+      .select('id, round_id, project_id, prompt, type, options_json, code, item_order, original_item_id');
+    if (itemErr) setMessage('❌ Lỗi khi load item: ' + itemErr.message);
     setItems(itemsData || []);
+    const { data: roundsData } = await supabase.from('rounds').select('id, round_number, project_id');
     setRounds(roundsData || []);
+    const { data: projectsData } = await supabase.from('projects').select('id, title');
     setProjects(projectsData || []);
+    setLoading(false);
   }
 
-  // Lọc rounds theo project chọn
-  const filteredRounds = projectId ? rounds.filter(r => r.project_id === projectId) : rounds;
-
-  function handleOptionChange(idx: number, value: string) {
+  function handleOptionChange(idx, value) {
     const arr = [...options];
     arr[idx] = value;
     setOptions(arr);
@@ -374,79 +377,86 @@ function AdminItemManager() {
   function addOptionField() {
     setOptions([...options, '']);
   }
-  function removeOptionField(idx: number) {
+  function removeOptionField(idx) {
     setOptions(options.filter((_, i) => i !== idx));
   }
   function resetForm() {
     setProjectId('');
     setRoundId('');
     setContent('');
-    setItemType('likert');
+    setItemType('multi');
     setOptions(['']);
+    setItemOrder('');
   }
+
+  // Chỉ lọc round theo project nếu chọn
+  const filteredRounds = projectId ? rounds.filter(r => r.project_id === projectId) : rounds;
 
   async function createItem() {
-  if (!roundId || !content) return;
-  let finalOptions: string[] | null = null;
-  if (['multi', 'radio', 'likert', 'binary'].includes(itemType)) {
-    finalOptions = options.filter(o => o.trim());
-    if (itemType === 'binary' && finalOptions.length === 0) finalOptions = ['Có', 'Không'];
-  }
-  const options_json = { choices: finalOptions ?? [] };
-  const code = 'YHCT' + Math.floor(1000 + Math.random() * 9000);
-
-  // Lấy project_id từ roundId
-  const selectedRound = rounds.find(r => r.id === roundId);
-  const project_id = selectedRound ? selectedRound.project_id : null;
-  if (!project_id) {
-    setMessage('❌ Không xác định được project_id của round!');
-    return;
-  }
-
-  const { error } = await supabase.from('items').insert([
-    {
-      id: crypto.randomUUID(),
-      round_id: roundId,
-      project_id: project_id,     // <-- Truyền vào!
-      prompt: content,
-      type: itemType,
-      options_json,
-      code,
+    if (!roundId || !content) return;
+    let finalOptions = null;
+    if (['multi', 'radio', 'likert', 'binary'].includes(itemType)) {
+      finalOptions = options.filter(o => o.trim());
+      if (itemType === 'binary' && finalOptions.length === 0) finalOptions = ['Có', 'Không'];
     }
-  ]);
-  if (error) {
-    setMessage('❌ Lỗi khi tạo item: ' + error.message);
-    return;
-  }
-  setMessage('✅ Đã tạo item mới!');
-  resetForm();
-  await loadAll();
-}
+    const options_json = { choices: finalOptions ?? [] };
+    const code = 'YHCT' + Math.floor(1000 + Math.random() * 9000);
 
-  async function deleteItem(id: string) {
+    // Lấy project_id từ roundId
+    const selectedRound = rounds.find(r => r.id === roundId);
+    const project_id = selectedRound ? selectedRound.project_id : null;
+    if (!project_id) {
+      setMessage('❌ Không xác định được project_id của round!');
+      return;
+    }
+
+    // Lấy giá trị item_order do người dùng nhập, hoặc tự động tăng cuối danh sách
+    let item_order = itemOrder ? parseInt(itemOrder, 10) : undefined;
+    if (!item_order) {
+      // Lấy số item hiện tại của round, tự tăng cuối danh sách
+      const { count } = await supabase
+        .from('items')
+        .select('id', { count: 'exact', head: true })
+        .eq('round_id', roundId);
+      item_order = (count ?? 0) + 1;
+    }
+
+    const { error } = await supabase.from('items').insert([
+      {
+        id: crypto.randomUUID(),
+        round_id: roundId,
+        project_id,
+        prompt: content,
+        type: itemType,
+        options_json,
+        code,
+        item_order,
+        original_item_id: null,
+      }
+    ]);
+    if (error) {
+      setMessage('❌ Lỗi khi tạo item: ' + error.message);
+      return;
+    }
+    setMessage('✅ Đã tạo item mới!');
+    resetForm();
+    await loadAll();
+  }
+
+  async function deleteItem(id) {
     await supabase.from('items').delete().eq('id', id);
     setMessage('🗑️ Đã xóa item!');
-    loadAll();
+    await loadAll();
   }
 
-  // --------- CHỨC NĂNG CLONE ITEM SANG ROUND TIẾP THEO CỦA PROJECT -----------
-  interface ItemType {
-  id: string;
-  round_id: string;
-  content: string;
-  type: string;
-  options?: string[] | null;
-  original_item_id?: string | null;
-}
-
-  async function cloneItemToNextRound(item: ItemType) {
-    // Lấy round hiện tại
+  // Hàm clone sang round tiếp theo (có gán lại thứ tự cuối cùng)
+  async function cloneItemToNextRound(item) {
     const currentRound = rounds.find(r => r.id === item.round_id);
     if (!currentRound) {
       setMessage('Không tìm thấy round hiện tại!');
       return;
     }
-    // Tìm round kế tiếp trong cùng project (round_number lớn hơn, project_id giống)
+    // Tìm round kế tiếp
     const nextRound = rounds
       .filter(r => r.project_id === currentRound.project_id && r.round_number > currentRound.round_number)
       .sort((a, b) => a.round_number - b.round_number)[0];
@@ -455,17 +465,28 @@ function AdminItemManager() {
       setMessage('❌ Không có round kế tiếp trong project này!');
       return;
     }
-    // Clone item với original_item_id (ưu tiên trường này, nếu chưa có thì chính là id gốc)
-    await supabase.from('items').insert({
-      id: crypto.randomUUID(),
-      round_id: nextRound.id,
-      content: item.content,
-      type: item.type,
-      options: item.options,
-      original_item_id: item.original_item_id || item.id,
-    });
+    // Tìm số thứ tự cuối cùng của round mới
+    const { count } = await supabase
+      .from('items')
+      .select('id', { count: 'exact', head: true })
+      .eq('round_id', nextRound.id);
+    const nextOrder = (count ?? 0) + 1;
+
+    await supabase.from('items').insert([
+      {
+        id: crypto.randomUUID(),
+        round_id: nextRound.id,
+        project_id: nextRound.project_id,
+        prompt: item.prompt,
+        type: item.type,
+        options_json: item.options_json,
+        code: item.code,
+        item_order: nextOrder,
+        original_item_id: item.original_item_id || item.id,
+      }
+    ]);
     setMessage('✅ Đã clone item sang round kế tiếp!');
-    loadAll();
+    await loadAll();
   }
 
   return (
@@ -494,10 +515,22 @@ function AdminItemManager() {
             if (e.target.value === 'binary') setOptions(['Có', 'Không']);
             else setOptions(['']);
           }}>
-            {ITEM_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+            <option value="multi">Chọn nhiều đáp án</option>
+            <option value="radio">Chọn 1 đáp án</option>
+            <option value="likert">Thang Likert</option>
+            <option value="binary">Nhị giá (Có/Không, Đúng/Sai)</option>
+            <option value="text">Nhập tự do</option>
           </select>
+          <input
+            className="border p-2"
+            type="number"
+            min={1}
+            value={itemOrder}
+            onChange={e => setItemOrder(e.target.value)}
+            placeholder="Thứ tự câu hỏi (item_order)"
+          />
         </div>
-        <input className="border p-2" value={content} onChange={e=>setContent(e.target.value)} placeholder="Nội dung Item" />
+        <input className="border p-2" value={content} onChange={e=>setContent(e.target.value)} placeholder="Nội dung câu hỏi (prompt)" />
         {['multi', 'radio', 'likert', 'binary'].includes(itemType) &&
           <div className="pl-2">
             <label className="block font-semibold mb-1">Đáp án:</label>
@@ -522,10 +555,13 @@ function AdminItemManager() {
         }
         <button type="button" onClick={createItem} className="bg-blue-600 text-white px-4 py-2 rounded w-fit mt-2">➕ Tạo Item</button>
       </form>
+      {loading ? <div>Đang tải...</div> :
       <table className="min-w-full border text-sm bg-white shadow">
         <thead>
           <tr className="bg-gray-100">
-            <th className="p-2">Nội dung</th>
+            <th className="p-2">STT</th>
+            <th className="p-2">Nội dung (prompt)</th>
+            <th className="p-2">Code</th>
             <th className="p-2">Project</th>
             <th className="p-2">Round</th>
             <th className="p-2">Loại</th>
@@ -535,29 +571,34 @@ function AdminItemManager() {
           </tr>
         </thead>
         <tbody>
-          {items.map(i => {
-            const round = rounds.find(r=>r.id===i.round_id);
-            const project = round && projects.find(p => p.id === round.project_id);
-            return (
-              <tr key={i.id}>
-                <td className="p-2">{i.content}</td>
-                <td className="p-2">{project?.title || ""}</td>
-                <td className="p-2">{round ? `Vòng ${round.round_number}` : ''}</td>
-                <td className="p-2">{ITEM_TYPES.find(t=>t.value===i.type)?.label || i.type}</td>
-                <td className="p-2">{Array.isArray(i.options) ? i.options.join(' | ') : ""}</td>
-                <td className="p-2">
-                  <button className="bg-green-600 text-white px-2 py-1 rounded" onClick={() => cloneItemToNextRound(i)}>
-                    ➡️ Chuyển sang round tiếp theo
-                  </button>
-                </td>
-                <td className="p-2">
-                  <button className="text-red-500" onClick={()=>deleteItem(i.id)}>🗑️ Xóa</button>
-                </td>
-              </tr>
-            )
+          {items
+            .sort((a, b) => (a.item_order || 0) - (b.item_order || 0))
+            .map((i, idx) => {
+              const round = rounds.find(r=>r.id===i.round_id);
+              const project = projects.find(p => p.id === i.project_id);
+              return (
+                <tr key={i.id}>
+                  <td className="p-2">{i.item_order || idx+1}</td>
+                  <td className="p-2">{i.prompt}</td>
+                  <td className="p-2">{i.code}</td>
+                  <td className="p-2">{project?.title || ""}</td>
+                  <td className="p-2">{round ? `Vòng ${round.round_number}` : ''}</td>
+                  <td className="p-2">{i.type}</td>
+                  <td className="p-2">{Array.isArray(i.options_json?.choices) ? i.options_json.choices.join(' | ') : ""}</td>
+                  <td className="p-2">
+                    <button className="bg-green-600 text-white px-2 py-1 rounded" onClick={() => cloneItemToNextRound(i)}>
+                      ➡️ Chuyển sang round tiếp theo
+                    </button>
+                  </td>
+                  <td className="p-2">
+                    <button className="text-red-500" onClick={()=>deleteItem(i.id)}>🗑️ Xóa</button>
+                  </td>
+                </tr>
+              )
           })}
         </tbody>
       </table>
+      }
     </div>
   );
 }
