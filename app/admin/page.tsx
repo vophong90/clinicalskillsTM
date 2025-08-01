@@ -25,14 +25,13 @@ function AdminUserManager() {
   useEffect(() => {
     loadAll();
     supabase.auth.getUser().then(({ data }) => {
-    console.log("User id FE đang login:", data.user?.id);
-  });
+      console.log("User id FE đang login:", data.user?.id);
+    });
   }, []);
 
   async function loadAll() {
     setLoading(true);
-    // Policy phải cho phép SELECT trên profiles!
-    const { data: profiles, error: err1 } = await supabase.from('profiles').select('id, email, name, role');
+    const { data: profiles } = await supabase.from('profiles').select('id, email, name, role');
     const { data: roundsData } = await supabase.from('rounds').select('id, round_number, status, project_id');
     const { data: participantsData } = await supabase.from('round_participants').select('id, user_id, round_id');
     const { data: projectsData } = await supabase.from('projects').select('id, title');
@@ -45,14 +44,12 @@ function AdminUserManager() {
     setLoading(false);
   }
 
-  // Đổi quyền user (toàn cục)
   async function changeRole(userId: string, newRole: string) {
     await supabase.from('profiles').update({ role: newRole }).eq('id', userId);
     setMessage('✅ Đã cập nhật quyền!');
     loadAll();
   }
 
-  // Gán user vào project (role tuỳ chọn)
   async function addToProject(userId: string, projectId: string, role: string) {
     await supabase.from('permissions').upsert([
       { id: crypto.randomUUID(), user_id: userId, project_id: projectId, role }
@@ -61,7 +58,6 @@ function AdminUserManager() {
     loadAll();
   }
 
-  // Gán user vào round
   async function addToRound(userId: string, roundId: string) {
     await supabase.from('round_participants').insert({
       id: crypto.randomUUID(),
@@ -72,14 +68,12 @@ function AdminUserManager() {
     loadAll();
   }
 
-  // Xoá user khỏi round
   async function removeFromRound(participantId: string) {
     await supabase.from('round_participants').delete().eq('id', participantId);
     setMessage('✅ Đã xoá user khỏi round!');
     loadAll();
   }
 
-  // Xoá user khỏi project
   async function removeFromProject(userId: string, projectId: string) {
     await supabase.from('permissions').delete().eq('user_id', userId).eq('project_id', projectId);
     setMessage('✅ Đã xoá user khỏi project!');
@@ -112,7 +106,7 @@ function AdminUserManager() {
               <td className="p-2">{u.email}</td>
               <td className="p-2">{u.name}</td>
               <td className="p-2">
-                <select value={u.app_role || 'viewer'} onChange={e => changeRole(u.id, e.target.value)}>
+                <select value={u.role || 'viewer'} onChange={e => changeRole(u.id, e.target.value)}>
                   <option value="admin">admin</option>
                   <option value="editor">editor</option>
                   <option value="secretary">secretary</option>
@@ -346,7 +340,7 @@ function AdminRoundManager() {
   );
 }
 
-// ---- ITEM MANAGER (có chọn Project/Round, loại item, đáp án động) ----
+// ---- ITEM MANAGER (CÓ CLONE ITEM SANG ROUND TIẾP THEO) ----
 function AdminItemManager() {
   const [items, setItems] = useState<any[]>([]);
   const [rounds, setRounds] = useState<any[]>([]);
@@ -361,7 +355,7 @@ function AdminItemManager() {
   useEffect(() => { loadAll(); }, []);
 
   async function loadAll() {
-    const { data: itemsData } = await supabase.from('items').select('id, content, round_id, type, options');
+    const { data: itemsData } = await supabase.from('items').select('id, content, round_id, type, options, original_item_id');
     const { data: roundsData } = await supabase.from('rounds').select('id, round_number, project_id');
     const { data: projectsData } = await supabase.from('projects').select('id, title');
     setItems(itemsData || []);
@@ -393,7 +387,6 @@ function AdminItemManager() {
 
   async function createItem() {
     if (!roundId || !content) return;
-    // Chuẩn bị options tuỳ loại
     let finalOptions: string[] | null = null;
     if (['multi', 'radio', 'likert', 'binary'].includes(itemType)) {
       finalOptions = options.filter(o => o.trim());
@@ -404,7 +397,8 @@ function AdminItemManager() {
       round_id: roundId,
       content,
       type: itemType,
-      options: finalOptions
+      options: finalOptions,
+      original_item_id: null // Bản gốc sẽ tự động cập nhật sau, hoặc dùng trigger
     });
     setMessage('✅ Đã tạo item mới!');
     resetForm();
@@ -414,6 +408,36 @@ function AdminItemManager() {
   async function deleteItem(id: string) {
     await supabase.from('items').delete().eq('id', id);
     setMessage('🗑️ Đã xóa item!');
+    loadAll();
+  }
+
+  // --------- CHỨC NĂNG CLONE ITEM SANG ROUND TIẾP THEO CỦA PROJECT -----------
+  async function cloneItemToNextRound(item) {
+    // Lấy round hiện tại
+    const currentRound = rounds.find(r => r.id === item.round_id);
+    if (!currentRound) {
+      setMessage('Không tìm thấy round hiện tại!');
+      return;
+    }
+    // Tìm round kế tiếp trong cùng project (round_number lớn hơn, project_id giống)
+    const nextRound = rounds
+      .filter(r => r.project_id === currentRound.project_id && r.round_number > currentRound.round_number)
+      .sort((a, b) => a.round_number - b.round_number)[0];
+
+    if (!nextRound) {
+      setMessage('❌ Không có round kế tiếp trong project này!');
+      return;
+    }
+    // Clone item với original_item_id (ưu tiên trường này, nếu chưa có thì chính là id gốc)
+    await supabase.from('items').insert({
+      id: crypto.randomUUID(),
+      round_id: nextRound.id,
+      content: item.content,
+      type: item.type,
+      options: item.options,
+      original_item_id: item.original_item_id || item.id,
+    });
+    setMessage('✅ Đã clone item sang round kế tiếp!');
     loadAll();
   }
 
@@ -440,7 +464,6 @@ function AdminItemManager() {
           </select>
           <select className="border p-2" value={itemType} onChange={e => {
             setItemType(e.target.value);
-            // Reset options khi đổi loại
             if (e.target.value === 'binary') setOptions(['Có', 'Không']);
             else setOptions(['']);
           }}>
@@ -448,7 +471,6 @@ function AdminItemManager() {
           </select>
         </div>
         <input className="border p-2" value={content} onChange={e=>setContent(e.target.value)} placeholder="Nội dung Item" />
-        {/* Tạo đáp án nếu không phải dạng text */}
         {['multi', 'radio', 'likert', 'binary'].includes(itemType) &&
           <div className="pl-2">
             <label className="block font-semibold mb-1">Đáp án:</label>
@@ -481,6 +503,7 @@ function AdminItemManager() {
             <th className="p-2">Round</th>
             <th className="p-2">Loại</th>
             <th className="p-2">Đáp án</th>
+            <th className="p-2">Chuyển sang round tiếp theo</th>
             <th className="p-2">Thao tác</th>
           </tr>
         </thead>
@@ -495,6 +518,11 @@ function AdminItemManager() {
                 <td className="p-2">{round ? `Vòng ${round.round_number}` : ''}</td>
                 <td className="p-2">{ITEM_TYPES.find(t=>t.value===i.type)?.label || i.type}</td>
                 <td className="p-2">{Array.isArray(i.options) ? i.options.join(' | ') : ""}</td>
+                <td className="p-2">
+                  <button className="bg-green-600 text-white px-2 py-1 rounded" onClick={() => cloneItemToNextRound(i)}>
+                    ➡️ Chuyển sang round tiếp theo
+                  </button>
+                </td>
                 <td className="p-2">
                   <button className="text-red-500" onClick={()=>deleteItem(i.id)}>🗑️ Xóa</button>
                 </td>
