@@ -49,34 +49,34 @@ export default function Dashboard() {
       setError(null);
 
       // Lấy user từ Supabase Auth
-const { data: userData, error: userError } = await supabase.auth.getUser();
-if (userError || !userData?.user) {
-  setError('❌ Không xác định được người dùng.');
-  setLoading(false);
-  return;
-}
-const user = userData.user; // <-- Đảm bảo user tồn tại và đúng cấu trúc
+      const { data: userData, error: userError } = await supabase.auth.getUser();
+      if (userError || !userData?.user) {
+        setError('❌ Không xác định được người dùng.');
+        setLoading(false);
+        return;
+      }
+      const user = userData.user;
 
-// Lấy profile theo id (bổ sung app_role)
-const { data: profile, error: profileError } = await supabase
-  .from('profiles')
-  .select('id, name, app_role')
-  .eq('id', user.id)
-  .maybeSingle();
+      // Lấy profile theo id (bổ sung app_role)
+      const { data: profile, error: profileError } = await supabase
+        .from('profiles')
+        .select('id, name, app_role')
+        .eq('id', user.id)
+        .maybeSingle();
 
-if (profileError) {
-  setError('❌ Lỗi truy vấn profile: ' + profileError.message);
-  setLoading(false);
-  return;
-}
-if (!profile) {
-  setError('❌ Không tìm thấy profile cho user hiện tại.');
-  setLoading(false);
-  return;
-}
+      if (profileError) {
+        setError('❌ Lỗi truy vấn profile: ' + profileError.message);
+        setLoading(false);
+        return;
+      }
+      if (!profile) {
+        setError('❌ Không tìm thấy profile cho user hiện tại.');
+        setLoading(false);
+        return;
+      }
 
-setName(profile.name || '');
-setIsAdmin(profile.app_role === 'admin');
+      setName(profile.name || '');
+      setIsAdmin(profile.app_role === 'admin');
 
       // Lấy quyền
       const { data: permissionsData } = await supabase
@@ -138,7 +138,10 @@ setIsAdmin(profile.app_role === 'admin');
           🔧 Vào trang quản trị
         </Link>
       )}
-      <button onClick={handleLogout} className="absolute top-6 right-6 px-4 py-1 rounded bg-gray-200 hover:bg-gray-300 text-gray-600 text-sm font-semibold">
+      <button
+        onClick={handleLogout}
+        className="absolute top-6 right-6 px-4 py-1 rounded bg-gray-200 hover:bg-gray-300 text-gray-600 text-sm font-semibold"
+      >
         Đăng xuất
       </button>
       <div className="w-full max-w-2xl space-y-8 mt-4">
