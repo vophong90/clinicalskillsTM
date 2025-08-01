@@ -24,6 +24,9 @@ function AdminUserManager() {
 
   useEffect(() => {
     loadAll();
+    supabase.auth.getUser().then(({ data }) => {
+    console.log("User id FE đang login:", data.user?.id);
+  });
   }, []);
 
   async function loadAll() {
