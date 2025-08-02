@@ -28,6 +28,7 @@ type Round = {
   project_id: string;
   status: 'draft' | 'active' | 'closed';
   round_number: number;
+  description?: string;
 };
 
 export default function SurveyPage() {
