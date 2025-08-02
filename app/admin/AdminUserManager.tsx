@@ -16,7 +16,6 @@ function translateRole(role: string) {
     case "viewer": return "Quan sát viên";
     case "core_expert": return "Chuyên gia nòng cốt";
     case "external_expert": return "Chuyên gia bên ngoài";
-    case "editor": return "Biên tập";
     default: return role;
   }
 }
@@ -27,7 +26,6 @@ const SYSTEM_ROLES = [
   { value: "viewer", label: "Quan sát viên" },
   { value: "core_expert", label: "Chuyên gia nòng cốt" },
   { value: "external_expert", label: "Chuyên gia bên ngoài" },
-  { value: "editor", label: "Biên tập" }
 ];
 
 export default function AdminUserManager() {
