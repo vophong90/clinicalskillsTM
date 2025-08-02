@@ -61,16 +61,6 @@ export default function AdminUserManager() {
 
   useEffect(() => { loadAll(); }, []);
 
-  async function changeProjectRole(permissionId: string, newRole: string) {
-  const { error } = await supabase
-    .from('permissions')
-    .update({ role: newRole })
-    .eq('id', permissionId);
-  if (error) setMessage('❌ Lỗi cập nhật quyền project: ' + error.message);
-  else setMessage('✅ Đã cập nhật quyền project!');
-  await loadAll();
-}
-
   async function changeUserRole(newRole: string) {
     if (!selectedUserId) return;
     const { error } = await supabase.from('profiles').update({ role: newRole }).eq('id', selectedUserId);
@@ -94,6 +84,18 @@ export default function AdminUserManager() {
     else setMessage('🗑️ Đã xóa quyền project!');
     await loadAll();
   }
+
+  // Cập nhật quyền project (phân quyền từng project)
+  async function changeProjectRole(permissionId: string, newRole: string) {
+    const { error } = await supabase
+      .from('permissions')
+      .update({ role: newRole })
+      .eq('id', permissionId);
+    if (error) setMessage('❌ Lỗi cập nhật quyền project: ' + error.message);
+    else setMessage('✅ Đã cập nhật quyền project!');
+    await loadAll();
+  }
+
   async function addUserToRound(roundId: string) {
     if (!selectedUserId) return;
     const { error } = await supabase.from('round_participants').insert([
@@ -128,12 +130,6 @@ export default function AdminUserManager() {
       round_id: pa.round_id
     }));
 
-  function roundDisplayInfo(round_id: string) {
-    const round = rounds.find(r => r.id === round_id);
-    if (!round) return '';
-    const project = projects.find(p => p.id === round.project_id);
-    return `${project?.title || ''} - V${round.round_number}`;
-  }
   const availableProjects = projects.filter(pr =>
     !userProjects.some(up => up.project_id === pr.id)
   );
@@ -151,50 +147,50 @@ export default function AdminUserManager() {
       </h2>
       {message && <div className="mb-6 text-center py-2 rounded bg-green-50 text-green-700 shadow">{message}</div>}
 
-    <div className="mb-8 flex flex-col gap-6 items-stretch">
-  {/* Dropdown chọn user */}
-  <div>
-    <label className="block font-semibold mb-2 text-gray-700">Chọn người dùng:</label>
-    <select
-      value={selectedUserId ?? ''}
-      onChange={e => setSelectedUserId(e.target.value || null)}
-      className="w-full border border-gray-300 rounded px-3 py-2 shadow bg-white"
-    >
-      <option value="">-- Chọn user --</option>
-      {users.map(u => (
-        <option key={u.id} value={u.id}>
-          {u.name || u.email} ({u.email})
-        </option>
-      ))}
-    </select>
-  </div>
-
-  {/* Card thông tin user */}
-  {selectedUser && (
-    <div className="w-full border rounded-2xl p-6 bg-white shadow-xl min-w-[350px] space-y-6">
-      {/* Thông tin user */}
-      <div>
-        <div className="mb-1 text-gray-700">
-          <b className="mr-2">Email:</b>
-          <span className="font-mono text-indigo-800">{selectedUser.email}</span>
-        </div>
-        <div className="mb-1 text-gray-700">
-          <b className="mr-2">Tên:</b>
-          <span>{selectedUser.name}</span>
-        </div>
-        <div className="flex items-center mt-2">
-          <b>Quyền hệ thống:</b>
+      <div className="mb-8 flex flex-col gap-6 items-stretch">
+        {/* Dropdown chọn user */}
+        <div>
+          <label className="block font-semibold mb-2 text-gray-700">Chọn người dùng:</label>
           <select
-            className="ml-2 border border-gray-300 rounded px-2 py-1 bg-gray-50 text-indigo-800"
-            value={selectedUser.role}
-            onChange={e => changeUserRole(e.target.value)}
+            value={selectedUserId ?? ''}
+            onChange={e => setSelectedUserId(e.target.value || null)}
+            className="w-full border border-gray-300 rounded px-3 py-2 shadow bg-white"
           >
-            {SYSTEM_ROLES.map(r => (
-              <option key={r.value} value={r.value}>{r.label}</option>
+            <option value="">-- Chọn user --</option>
+            {users.map(u => (
+              <option key={u.id} value={u.id}>
+                {u.name || u.email} ({u.email})
+              </option>
             ))}
           </select>
         </div>
-      </div>
+
+        {/* Card thông tin user */}
+        {selectedUser && (
+          <div className="w-full border rounded-2xl p-6 bg-white shadow-xl min-w-[350px] space-y-6">
+            {/* Thông tin user */}
+            <div>
+              <div className="mb-1 text-gray-700">
+                <b className="mr-2">Email:</b>
+                <span className="font-mono text-indigo-800">{selectedUser.email}</span>
+              </div>
+              <div className="mb-1 text-gray-700">
+                <b className="mr-2">Tên:</b>
+                <span>{selectedUser.name}</span>
+              </div>
+              <div className="flex items-center mt-2">
+                <b>Quyền hệ thống:</b>
+                <select
+                  className="ml-2 border border-gray-300 rounded px-2 py-1 bg-gray-50 text-indigo-800"
+                  value={selectedUser.role}
+                  onChange={e => changeUserRole(e.target.value)}
+                >
+                  {SYSTEM_ROLES.map(r => (
+                    <option key={r.value} value={r.value}>{r.label}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
             {/* Phân quyền dự án */}
             <div className="border-t pt-4">
               <div className="flex items-center justify-between mb-2">
@@ -215,36 +211,37 @@ export default function AdminUserManager() {
                 </select>
               </div>
               <ul className="mt-2 space-y-1">
-  {userProjects.length === 0 && <li className="text-gray-400 italic">Chưa thuộc project nào.</li>}
-  {userProjects.map(p => (
-    <li
-      key={p.permission_id}
-      className="flex flex-wrap md:flex-nowrap items-center justify-between gap-2 bg-gray-50 rounded px-3 py-2"
-    >
-      <span>
-        <b>{p.title}</b>
-      </span>
-      <span className="flex items-center gap-2">
-        <select
-          className="border rounded px-2 py-1 bg-indigo-50 text-indigo-800 text-xs font-semibold"
-          value={p.role}
-          onChange={e => changeProjectRole(p.permission_id, e.target.value)}
-        >
-          {SYSTEM_ROLES.filter(r => r.value !== 'admin').map(r => (
-            <option key={r.value} value={r.value}>{r.label}</option>
-          ))}
-        </select>
-        <span className="inline-block px-2 py-0.5 rounded bg-indigo-100 text-indigo-800 text-xs font-semibold">
-          {translateRole(p.role)}
-        </span>
-        <button
-          className="text-red-500 text-xs font-bold hover:underline hover:text-red-700 ml-2"
-          onClick={() => removeUserFromProject(p.permission_id)}
-        >Xóa</button>
-      </span>
-    </li>
-  ))}
-</ul>
+                {userProjects.length === 0 && <li className="text-gray-400 italic">Chưa thuộc project nào.</li>}
+                {userProjects.map(p => (
+                  <li
+                    key={p.permission_id}
+                    className="flex flex-wrap md:flex-nowrap items-center justify-between gap-2 bg-gray-50 rounded px-3 py-2"
+                  >
+                    <span>
+                      <b>{p.title}</b>
+                    </span>
+                    <span className="flex items-center gap-2">
+                      <select
+                        className="border rounded px-2 py-1 bg-indigo-50 text-indigo-800 text-xs font-semibold"
+                        value={p.role}
+                        onChange={e => changeProjectRole(p.permission_id, e.target.value)}
+                      >
+                        {SYSTEM_ROLES.filter(r => r.value !== 'admin').map(r => (
+                          <option key={r.value} value={r.value}>{r.label}</option>
+                        ))}
+                      </select>
+                      <span className="inline-block px-2 py-0.5 rounded bg-indigo-100 text-indigo-800 text-xs font-semibold">
+                        {translateRole(p.role)}
+                      </span>
+                      <button
+                        className="text-red-500 text-xs font-bold hover:underline hover:text-red-700 ml-2"
+                        onClick={() => removeUserFromProject(p.permission_id)}
+                      >Xóa</button>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
 
             {/* Quản lý round */}
             <div className="border-t pt-4">
