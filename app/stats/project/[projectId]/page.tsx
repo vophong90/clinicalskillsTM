@@ -364,7 +364,7 @@ function StatBlock({ item, stats, comments }: { item: Item, stats: any, comments
   if (item.type === "scale" && stats.vals) {
     // Đếm số lần mỗi giá trị xuất hiện
     const counter: Record<number, number> = {};
-    stats.vals.forEach(v => {
+    stats.vals.forEach((v: number)=> {
       counter[v] = (counter[v] || 0) + 1;
     });
     scaleChart = Object.entries(counter).map(([v, c]) => ({ value: Number(v), count: c as number }));
