@@ -257,6 +257,16 @@ export default function Dashboard() {
                 <div className="text-gray-400 italic text-sm">Chưa có vòng khảo sát nào</div>
               )}
             </div>
+            {/* Nút Kết quả dự án, chỉ cho admin và viewer */}
+{["admin", "viewer"].includes(project.role ?? "") && (
+  <Link
+    href={`/stats/project/${project.id}`}
+    className="inline-block mt-2 px-4 py-1 bg-purple-700 hover:bg-purple-800 text-white rounded-lg font-semibold shadow transition"
+    style={{ alignSelf: "flex-end" }}
+  >
+    📊 Kết quả dự án
+  </Link>
+)}
           </div>
         ))}
       </div>
