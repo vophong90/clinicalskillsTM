@@ -57,10 +57,10 @@ export default function Dashboard() {
       }
       const user = userData.user;
 
-      // Lấy profile (id, name)
+      // Lấy profile (id, name, role)
       const { data: profile, error: profileError } = await supabase
         .from('profiles')
-        .select('id, name')
+        .select('id, name, role')
         .eq('id', user.id)
         .maybeSingle();
 
@@ -76,31 +76,25 @@ export default function Dashboard() {
       }
 
       setName(profile.name || '');
+      setIsAdmin(profile.role === 'admin');
 
-      // Lấy quyền từ bảng permissions
-      const { data: permissionsData, error: permissionsError } = await supabase
-        .from('permissions')
-        .select('role, project_id')
-        .eq('user_id', profile.id);
+      // Lấy quyền từ bảng permissions (chỉ để lấy danh sách dự án, KHÔNG kiểm tra admin ở đây)
+const { data: permissionsData, error: permissionsError } = await supabase
+  .from('permissions')
+  .select('role, project_id')
+  .eq('user_id', profile.id);
 
-      if (permissionsError) {
-        setError('❌ Lỗi truy vấn permissions: ' + permissionsError.message);
-        setLoading(false);
-        return;
-      }
+if (permissionsError) {
+  setError('❌ Lỗi truy vấn permissions: ' + permissionsError.message);
+  setLoading(false);
+  return;
+}
 
-      if (!permissionsData || permissionsData.length === 0) {
-        setProjects([]);
-        setIsAdmin(false);
-        setLoading(false);
-        return;
-      }
+// Nếu không thuộc dự án nào thì vẫn có thể là admin hệ thống!
+const projectIds = permissionsData?.map(p => p.project_id) || [];
 
-      const projectIds = permissionsData.map(p => p.project_id);
-
-      // Kiểm tra user có quyền admin trong ít nhất một project
-      const isAdminRole = permissionsData.some(p => p.role === 'admin');
-      setIsAdmin(isAdminRole);
+// Kiểm tra quyền admin HỆ THỐNG từ profile
+setIsAdmin(profile.role === 'admin');
 
       // Lấy projects
       const { data: projectsData } = await supabase
