@@ -141,51 +141,50 @@ export default function AdminUserManager() {
       </h2>
       {message && <div className="mb-6 text-center py-2 rounded bg-green-50 text-green-700 shadow">{message}</div>}
 
-      <div className="mb-8 flex flex-col md:flex-row gap-6 items-start">
-        {/* Dropdown chọn user */}
-        <div className="w-full md:w-2/5">
-          <label className="block font-semibold mb-2 text-gray-700">Chọn người dùng:</label>
+    <div className="mb-8 flex flex-col gap-6 items-stretch">
+  {/* Dropdown chọn user */}
+  <div>
+    <label className="block font-semibold mb-2 text-gray-700">Chọn người dùng:</label>
+    <select
+      value={selectedUserId ?? ''}
+      onChange={e => setSelectedUserId(e.target.value || null)}
+      className="w-full border border-gray-300 rounded px-3 py-2 shadow bg-white"
+    >
+      <option value="">-- Chọn user --</option>
+      {users.map(u => (
+        <option key={u.id} value={u.id}>
+          {u.name || u.email} ({u.email})
+        </option>
+      ))}
+    </select>
+  </div>
+
+  {/* Card thông tin user */}
+  {selectedUser && (
+    <div className="w-full border rounded-2xl p-6 bg-white shadow-xl min-w-[350px] space-y-6">
+      {/* Thông tin user */}
+      <div>
+        <div className="mb-1 text-gray-700">
+          <b className="mr-2">Email:</b>
+          <span className="font-mono text-indigo-800">{selectedUser.email}</span>
+        </div>
+        <div className="mb-1 text-gray-700">
+          <b className="mr-2">Tên:</b>
+          <span>{selectedUser.name}</span>
+        </div>
+        <div className="flex items-center mt-2">
+          <b>Quyền hệ thống:</b>
           <select
-            value={selectedUserId ?? ''}
-            onChange={e => setSelectedUserId(e.target.value || null)}
-            className="w-full border border-gray-300 rounded px-3 py-2 shadow bg-white"
+            className="ml-2 border border-gray-300 rounded px-2 py-1 bg-gray-50 text-indigo-800"
+            value={selectedUser.role}
+            onChange={e => changeUserRole(e.target.value)}
           >
-            <option value="">-- Chọn user --</option>
-            {users.map(u => (
-              <option key={u.id} value={u.id}>
-                {u.name || u.email} ({u.email})
-              </option>
+            {SYSTEM_ROLES.map(r => (
+              <option key={r.value} value={r.value}>{r.label}</option>
             ))}
           </select>
         </div>
-
-        {/* Card thông tin user */}
-        {selectedUser && (
-          <div className="flex-1 border rounded-2xl p-6 bg-white shadow-xl min-w-[300px] space-y-6">
-            {/* Thông tin user */}
-            <div>
-              <div className="mb-1 text-gray-700">
-                <b className="mr-2">Email:</b>
-                <span className="font-mono text-indigo-800">{selectedUser.email}</span>
-              </div>
-              <div className="mb-1 text-gray-700">
-                <b className="mr-2">Tên:</b>
-                <span>{selectedUser.name}</span>
-              </div>
-              <div className="flex items-center mt-2">
-                <b>Quyền hệ thống:</b>
-                <select
-                  className="ml-2 border border-gray-300 rounded px-2 py-1 bg-gray-50 text-indigo-800"
-                  value={selectedUser.role}
-                  onChange={e => changeUserRole(e.target.value)}
-                >
-                  {SYSTEM_ROLES.map(r => (
-                    <option key={r.value} value={r.value}>{r.label}</option>
-                  ))}
-                </select>
-              </div>
-            </div>
-
+      </div>
             {/* Phân quyền dự án */}
             <div className="border-t pt-4">
               <div className="flex items-center justify-between mb-2">
