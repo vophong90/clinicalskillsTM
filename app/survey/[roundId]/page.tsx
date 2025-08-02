@@ -286,6 +286,25 @@ export default function SurveyPage() {
         <h1 className="text-2xl font-bold text-indigo-900 mb-2">
           Khảo sát — Vòng {round.round_number}
         </h1>
+        {/* Block mô tả khảo sát */}
+{round.description && (
+  <div className="w-full max-w-3xl mx-auto mb-6">
+    <div className="flex items-start gap-3 bg-blue-50 border-l-4 border-blue-400 shadow rounded-xl px-6 py-4">
+      <div className="flex-shrink-0 mt-0.5">
+        <svg width="32" height="32" fill="none" viewBox="0 0 32 32">
+          <circle cx="16" cy="16" r="16" fill="#3B82F6" fillOpacity="0.12"/>
+          <path d="M16 10v5m0 4h.01M16 22a6 6 0 100-12 6 6 0 000 12z" stroke="#2563eb" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+        </svg>
+      </div>
+      <div>
+        <div className="font-semibold text-blue-900 mb-1">Hướng dẫn & Thông tin khảo sát</div>
+        <div className="text-blue-800 whitespace-pre-line text-base">
+          {round.description}
+        </div>
+      </div>
+    </div>
+  </div>
+)}
         {round.status !== 'active' && (
           <p className="text-red-500 mb-2">
             Vòng này hiện {round.status}. Bạn không thể chỉnh sửa.
