@@ -24,6 +24,7 @@ export default function AdminItemManager() {
   const [projectId, setProjectId] = useState('');
   const [roundId, setRoundId] = useState('');
   const [content, setContent] = useState('');
+  const [code, setCode] = useState('');
   const [itemType, setItemType] = useState('multi');
   const [options, setOptions] = useState<string[]>(['']);
   const [itemOrder, setItemOrder] = useState('');
@@ -39,7 +40,7 @@ export default function AdminItemManager() {
     if (itemErr) setMessage('❌ Lỗi khi load item: ' + itemErr.message);
     setItems((itemsData as Item[]) ?? []);
     const { data: roundsData } = await supabase.from('rounds').select('id, round_number, project_id');
-    setRounds((roundsData as Round[]) ?? []); 
+    setRounds((roundsData as Round[]) ?? []);
     const { data: projectsData } = await supabase.from('projects').select('id, title');
     setProjects((projectsData as Project[]) ?? []);
     setLoading(false);
@@ -60,6 +61,7 @@ export default function AdminItemManager() {
     setProjectId('');
     setRoundId('');
     setContent('');
+    setCode('');
     setItemType('multi');
     setOptions(['']);
     setItemOrder('');
@@ -69,13 +71,16 @@ export default function AdminItemManager() {
 
   async function createItem() {
     if (!roundId || !content) return;
+    if (!code.trim()) {
+      setMessage('❌ Bạn phải nhập mã code cho item!');
+      return;
+    }
     let finalOptions: string[] | null = null;
     if (['multi', 'radio', 'likert', 'binary'].includes(itemType)) {
       finalOptions = options.filter(o => o.trim());
       if (itemType === 'binary' && finalOptions.length === 0) finalOptions = ['Có', 'Không'];
     }
     const options_json = { choices: finalOptions ?? [] };
-    const code = 'YHCT' + Math.floor(1000 + Math.random() * 9000);
 
     const selectedRound = rounds.find(r => r.id === roundId);
     const project_id = selectedRound ? selectedRound.project_id : null;
@@ -141,19 +146,21 @@ export default function AdminItemManager() {
       .eq('round_id', nextRound.id);
     const nextOrder = (count ?? 0) + 1;
 
-    await supabase.from('items').insert([
-      {
-        id: crypto.randomUUID(),
-        round_id: nextRound.id,
-        project_id: nextRound.project_id,
-        prompt: item.prompt,
-        type: item.type,
-        options_json: item.options_json,
-        code: item.code,
-        item_order: nextOrder,
-        original_item_id: item.original_item_id || item.id,
-      }
-    ]);
+    const { error } = await supabase.from('items').insert([{
+      id: crypto.randomUUID(),
+      round_id: nextRound.id,
+      project_id: nextRound.project_id,
+      prompt: item.prompt,
+      type: item.type,
+      options_json: item.options_json,
+      code: item.code, // vẫn giữ code cũ
+      item_order: nextOrder,
+      original_item_id: item.original_item_id || item.id,
+    }]);
+    if (error) {
+      setMessage('❌ Lỗi khi clone item: ' + error.message);
+      return;
+    }
     setMessage('✅ Đã clone item sang round tiếp theo!');
     await loadAll();
   }
@@ -162,7 +169,7 @@ export default function AdminItemManager() {
     <div className="max-w-4xl mx-auto py-8">
       <h2 className="text-xl font-bold mb-4">📝 Quản lý Item</h2>
       {message && <div className="mb-3 text-green-600">{message}</div>}
-      <form className="mb-4 flex flex-col gap-2 border p-4 rounded bg-gray-50">
+      <form className="mb-4 flex flex-col gap-2 border p-4 rounded bg-gray-50" onSubmit={e => { e.preventDefault(); createItem(); }}>
         <div className="flex flex-wrap gap-2">
           <select className="border p-2" value={projectId} onChange={e => {
             setProjectId(e.target.value);
@@ -199,7 +206,15 @@ export default function AdminItemManager() {
             placeholder="Thứ tự câu hỏi"
           />
         </div>
-        <input className="border p-2" value={content} onChange={e=>setContent(e.target.value)} placeholder="Nội dung câu hỏi" />
+        <input className="border p-2" value={content} onChange={e => setContent(e.target.value)} placeholder="Nội dung câu hỏi" />
+        {/* Trường nhập code thủ công */}
+        <input
+          className="border p-2"
+          value={code}
+          onChange={e => setCode(e.target.value)}
+          placeholder="Mã code item (bắt buộc)"
+          required
+        />
         {['multi', 'radio', 'likert', 'binary'].includes(itemType) &&
           <div className="pl-2">
             <label className="block font-semibold mb-1">Đáp án:</label>
@@ -209,7 +224,7 @@ export default function AdminItemManager() {
                   className="border p-1 w-60"
                   value={opt}
                   onChange={e => handleOptionChange(idx, e.target.value)}
-                  placeholder={`Đáp án ${idx+1}`}
+                  placeholder={`Đáp án ${idx + 1}`}
                   disabled={itemType === 'binary'}
                 />
                 {options.length > 1 && itemType !== 'binary' &&
@@ -222,67 +237,66 @@ export default function AdminItemManager() {
             }
           </div>
         }
-        <button type="button" onClick={createItem} className="bg-blue-600 text-white px-4 py-2 rounded w-fit mt-2">➕ Tạo Item</button>
+        <button type="submit" className="bg-blue-600 text-white px-4 py-2 rounded w-fit mt-2">➕ Tạo Item</button>
       </form>
       {loading ? <div>Đang tải...</div> :
-     <table className="min-w-full border text-sm bg-white shadow">
-  <thead>
-    <tr className="bg-gray-100">
-      <th className="p-2">Thứ tự</th>
-      <th className="p-2">Nội dung (prompt)</th>
-      <th className="p-2">Code</th>
-      <th className="p-2">Project</th>
-      <th className="p-2">Round</th>
-      <th className="p-2">Loại</th>
-      <th className="p-2">Đáp án</th>
-      <th className="p-2">Chuyển round</th>
-      <th className="p-2">Thao tác</th>
-    </tr>
-  </thead>
-  <tbody>
-    {items
-      .sort((a, b) => (a.item_order || 0) - (b.item_order || 0))
-      .map((i, idx) => {
-        const round = rounds.find(r => r.id === i.round_id);
-        const project = projects.find(p => p.id === i.project_id);
-        return (
-          <tr key={i.id}>
-            {/* ----- Cột Thứ tự (Order) với input sửa trực tiếp ----- */}
-            <td className="p-2 text-center">
-              <input
-                type="number"
-                min={1}
-                value={i.item_order ?? ''}
-                style={{ width: 54 }}
-                onChange={async (e) => {
-                  const newOrder = Number(e.target.value);
-                  if (newOrder > 0 && newOrder !== i.item_order) {
-                    await supabase.from('items').update({ item_order: newOrder }).eq('id', i.id);
-                    await loadAll();
-                  }
-                }}
-                className="border rounded w-14 text-center"
-              />
-            </td>
-            <td className="p-2">{i.prompt}</td>
-            <td className="p-2">{i.code}</td>
-            <td className="p-2">{project?.title || ""}</td>
-            <td className="p-2">{round ? `Vòng ${round.round_number}` : ''}</td>
-            <td className="p-2">{i.type}</td>
-            <td className="p-2">{Array.isArray(i.options_json?.choices) ? i.options_json.choices.join(' | ') : ""}</td>
-            <td className="p-2">
-              <button className="bg-green-600 text-white px-2 py-1 rounded" onClick={() => cloneItemToNextRound(i)}>
-                ➡️ Chuyển sang round tiếp theo
-              </button>
-            </td>
-            <td className="p-2">
-              <button className="text-red-500" onClick={() => deleteItem(i.id)}>🗑️ Xóa</button>
-            </td>
-          </tr>
-        )
-    })}
-  </tbody>
-</table>
+        <table className="min-w-full border text-sm bg-white shadow">
+          <thead>
+            <tr className="bg-gray-100">
+              <th className="p-2">Thứ tự</th>
+              <th className="p-2">Nội dung (prompt)</th>
+              <th className="p-2">Code</th>
+              <th className="p-2">Project</th>
+              <th className="p-2">Round</th>
+              <th className="p-2">Loại</th>
+              <th className="p-2">Đáp án</th>
+              <th className="p-2">Chuyển round</th>
+              <th className="p-2">Thao tác</th>
+            </tr>
+          </thead>
+          <tbody>
+            {items
+              .sort((a, b) => (a.item_order || 0) - (b.item_order || 0))
+              .map((i, idx) => {
+                const round = rounds.find(r => r.id === i.round_id);
+                const project = projects.find(p => p.id === i.project_id);
+                return (
+                  <tr key={i.id}>
+                    <td className="p-2 text-center">
+                      <input
+                        type="number"
+                        min={1}
+                        value={i.item_order ?? ''}
+                        style={{ width: 54 }}
+                        onChange={async (e) => {
+                          const newOrder = Number(e.target.value);
+                          if (newOrder > 0 && newOrder !== i.item_order) {
+                            await supabase.from('items').update({ item_order: newOrder }).eq('id', i.id);
+                            await loadAll();
+                          }
+                        }}
+                        className="border rounded w-14 text-center"
+                      />
+                    </td>
+                    <td className="p-2">{i.prompt}</td>
+                    <td className="p-2">{i.code}</td>
+                    <td className="p-2">{project?.title || ""}</td>
+                    <td className="p-2">{round ? `Vòng ${round.round_number}` : ''}</td>
+                    <td className="p-2">{i.type}</td>
+                    <td className="p-2">{Array.isArray(i.options_json?.choices) ? i.options_json.choices.join(' | ') : ""}</td>
+                    <td className="p-2">
+                      <button className="bg-green-600 text-white px-2 py-1 rounded" onClick={() => cloneItemToNextRound(i)}>
+                        ➡️ Chuyển sang round tiếp theo
+                      </button>
+                    </td>
+                    <td className="p-2">
+                      <button className="text-red-500" onClick={() => deleteItem(i.id)}>🗑️ Xóa</button>
+                    </td>
+                  </tr>
+                )
+              })}
+          </tbody>
+        </table>
       }
     </div>
   );
