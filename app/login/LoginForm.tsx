@@ -24,6 +24,28 @@ export default function LoginForm() {
     setLoading(false);
   }
 
+  async function handleSendResetLink() {
+    setMsg("");
+    if (!email) {
+      setMsg("❌ Vui lòng nhập email trước khi yêu cầu đặt lại mật khẩu.");
+      return;
+    }
+    setLoading(true);
+    const redirectTo =
+      typeof window !== "undefined"
+      ? `${window.location.origin}/auth/update-password`
+      : undefined;
+
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo, // trang bạn sẽ tạo ở bước B
+      });
+
+    if (error) setMsg("❌ " + error.message);
+    else setMsg("✅ Đã gửi email đặt lại mật khẩu. Vui lòng kiểm tra hộp thư.");
+
+    setLoading(false);
+  }
+
   return (
     <div className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-br from-green-50 to-blue-100 relative">
       <div className="flex-1 flex flex-col items-center justify-center w-full">
@@ -70,6 +92,16 @@ export default function LoginForm() {
             >
               {loading ? "Đang đăng nhập..." : "Đăng nhập"}
             </button>
+            
+            <button
+              type="button"
+              onClick={handleSendResetLink}
+              disabled={loading || !email}
+              className="text-sm text-green-700 underline mt-1 disabled:opacity-60"
+              >
+              Gửi liên kết đặt lại mật khẩu
+            </button>
+
           </form>
           <div className="text-center text-sm text-gray-500 pt-2">
             Quên mật khẩu? <span className="underline">Liên hệ thư ký hội đồng</span>
