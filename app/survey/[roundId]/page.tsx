@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
 import Protected from '@/components/Protected';
@@ -31,6 +31,12 @@ type Round = {
   description?: string;
 };
 
+type RespRow = {
+  item_id: string;
+  answer_json: any;
+  is_submitted: boolean;
+};
+
 export default function SurveyPage() {
   const params = useParams();
   const router = useRouter();
@@ -52,12 +58,13 @@ export default function SurveyPage() {
       setLoading(true);
       setMessage('');
 
-      // 1. Lấy round
+      // 1) Round
       const { data: r, error: er } = await supabase
         .from('rounds')
         .select('*')
         .eq('id', roundId)
         .single();
+
       if (er || !r) {
         setMessage('Không tìm thấy vòng khảo sát.');
         setLoading(false);
@@ -65,53 +72,69 @@ export default function SurveyPage() {
       }
       setRound(r);
 
-      // 2. Lấy items
+      // 2) Items (của vòng này)
       const { data: its, error: itErr } = await supabase
         .from('items')
         .select('id,prompt,options_json,type,item_order,project_id,round_id')
         .eq('project_id', r.project_id)
         .eq('round_id', r.id)
         .order('item_order', { ascending: true });
+
       if (itErr) {
         setMessage('Lỗi tải câu hỏi: ' + itErr.message);
         setLoading(false);
         return;
       }
-      setItems(its ?? []);
+      const safeItems = (its ?? []) as Item[];
+      setItems(safeItems);
 
-      // 3. Lấy userId
+      // 3) User
       const { data: session } = await supabase.auth.getSession();
       const userId = session.session?.user.id;
 
-      // 4. Lấy responses của user này
-      let resps: any[] = [];
+      // 4) Responses của user này (lọc theo round & bỏ trần 1000)
+      let resps: RespRow[] = [];
       if (userId) {
-        const { data } = await supabase
+        const { data: resData } = await supabase
           .from('responses')
           .select('item_id, answer_json, is_submitted')
           .eq('round_id', r.id)
-          .eq('user_id', userId);
-        resps = data || [];
+          .eq('user_id', userId)
+          .range(0, 999999);
+        resps = (resData ?? []) as RespRow[];
       }
 
-      // 5. Khởi tạo answer/comment state
+      // 4.1) LỌC BỎ RESPONSES MỒ CÔI (item đã bị xóa)
+      const validItemIds = new Set(safeItems.map(i => i.id));
+      const filteredResps = resps.filter(row => validItemIds.has(row.item_id));
+
+      // 5) Ánh xạ vào state answer/comment
       const map: Record<string, any> = {};
       const cmtMap: Record<string, string> = {};
       let wasSubmitted = false;
-      resps.forEach((row: any) => {
-        map[row.item_id] = row.answer_json?.value ?? row.answer_json?.choices ?? row.answer_json;
-        if (row.answer_json?.comment) cmtMap[row.item_id] = row.answer_json.comment;
+
+      filteredResps.forEach((row) => {
+        const a = row.answer_json;
+        // Lưu value/choices "gọn" để binding input
+        if (Array.isArray(a?.choices)) map[row.item_id] = a.choices;
+        else if (a?.value !== undefined) map[row.item_id] = a.value;
+        else map[row.item_id] = a ?? null;
+
+        if (typeof a?.comment === 'string' && a.comment.trim() !== '') {
+          cmtMap[row.item_id] = a.comment;
+        }
         if (row.is_submitted) wasSubmitted = true;
       });
+
       setAnswers(map);
       setComments(cmtMap);
       setSubmitted(wasSubmitted);
 
- // 6. Lấy nhận xét vòng trước qua RPC
+      // 6) Nhận xét vòng trước qua RPC (nếu có)
       if (r.round_number > 1) {
         const { data: rows, error: prevErr } = await supabase
           .rpc('get_prev_comments', { cur_round_id: r.id });
-        
+
         if (!prevErr && rows?.length) {
           const prevMap: Record<string, string[]> = {};
           rows.forEach((row: any) => {
@@ -121,13 +144,14 @@ export default function SurveyPage() {
           setPrevComments(prevMap);
         }
       }
+
       setLoading(false);
     };
 
     load();
   }, [roundId]);
 
-  // Thay đổi câu trả lời
+  // Helpers thay đổi câu trả lời
   const handleChange = (itemId: string, value: any) => {
     setAnswers(prev => ({ ...prev, [itemId]: value }));
   };
@@ -143,39 +167,54 @@ export default function SurveyPage() {
     });
   };
 
-  // Validate đã trả lời hết
-  const isAllAnswered = items.every(
-    it => answers[it.id] !== undefined && answers[it.id] !== null && (Array.isArray(answers[it.id]) ? answers[it.id].length > 0 : answers[it.id] !== "")
-  );
+  // Validate đã trả lời hết (DỰA TRÊN ITEMS HIỆN CÓ)
+  const isAllAnswered = useMemo(() => {
+    return items.every(it => {
+      const v = answers[it.id];
+      if (v === undefined || v === null) return false;
+      return Array.isArray(v) ? v.length > 0 : String(v).trim() !== '';
+    });
+  }, [items, answers]);
 
-  // Lưu/submit
+  // Lưu / Submit
   const handleSave = async () => save(false);
   const handleSubmit = async () => {
     if (!isAllAnswered) return;
     await save(true);
   };
+
+  // Gộp payload theo items hiện có; khi submit chỉ cập nhật responses của item hợp lệ
   const save = async (submit: boolean) => {
     if (!round) return;
     setMessage('Đang lưu...');
     const { data: session } = await supabase.auth.getSession();
     const userId = session.session?.user.id!;
+    const validItemIds = new Set(items.map(i => i.id));
+
     const payload = items.map(it => {
-      let answer_json: any = {};
-      if (Array.isArray(answers[it.id])) answer_json.choices = answers[it.id];
-      else if (typeof answers[it.id] === 'number' || typeof answers[it.id] === 'string') answer_json.value = answers[it.id];
-      if (comments[it.id]) answer_json.comment = comments[it.id];
+      const raw = answers[it.id];
+      const ans: any = {};
+      if (Array.isArray(raw)) ans.choices = raw;
+      else if (typeof raw === 'number' || typeof raw === 'string') ans.value = raw;
+      if (comments[it.id]) ans.comment = comments[it.id];
+
       return {
         round_id: round.id,
         item_id: it.id,
         user_id: userId,
-        answer_json,
+        answer_json: ans,
         is_submitted: submit,
       };
     });
+
     const { error } = await supabase
       .from('responses')
       .upsert(payload, { onConflict: 'round_id,item_id,user_id' });
-    setMessage(error ? ('Lỗi lưu: ' + error.message) : (submit ? 'Đã gửi thành công.' : 'Đã lưu nháp.'));
+
+    setMessage(
+      error ? ('Lỗi lưu: ' + error.message) : (submit ? 'Đã gửi thành công.' : 'Đã lưu nháp.')
+    );
+
     if (!error && submit) {
       setSubmitted(true);
       setTimeout(() => router.push('/dashboard'), 1500);
@@ -187,28 +226,29 @@ export default function SurveyPage() {
   const goBack = () => setCurIndex(idx => Math.max(0, idx - 1));
   const goNext = () => setCurIndex(idx => Math.min(items.length - 1, idx + 1));
 
-  // Giao diện từng câu hỏi
+  // Render 1 câu
   const renderQuestion = (it: Item, idx: number) => {
     const choices = it.options_json?.choices ?? [];
     const isActive = round?.status === 'active' && !submitted;
+
     return (
       <div key={it.id} className="bg-white shadow-2xl rounded-2xl p-8 mb-8 w-full max-w-3xl mx-auto min-w-[420px]">
         <div className="flex items-center gap-3 mb-2">
           <span className="text-sm text-gray-400 font-semibold">Câu {idx + 1}/{items.length}</span>
           <span className="font-bold text-lg text-indigo-800 flex-1">{it.prompt}</span>
         </div>
+
         {/* Ý kiến chuyên gia vòng trước */}
         {prevComments[it.id]?.length > 0 && (
           <div className="bg-blue-50 border-l-4 border-blue-400 p-3 mb-2 text-sm text-blue-700 rounded">
             <div className="font-semibold mb-1">Ý kiến từ chuyên gia vòng trước:</div>
             <ul className="list-disc ml-5">
-              {prevComments[it.id].map((cmt, idx) => (
-                <li key={idx}>{cmt}</li>
-              ))}
+              {prevComments[it.id].map((cmt, i) => (<li key={i}>{cmt}</li>))}
             </ul>
           </div>
         )}
-        {/* Các lựa chọn */}
+
+        {/* Lựa chọn / thang điểm */}
         <div className="flex gap-4 flex-wrap items-center mb-2">
           {choices.length > 0 ? (
             it.type === 'multi' ? (
@@ -249,6 +289,7 @@ export default function SurveyPage() {
             />
           )}
         </div>
+
         {/* Nhận xét */}
         <div>
           <textarea
@@ -264,12 +305,11 @@ export default function SurveyPage() {
     );
   };
 
-  // Xác định đã trả lời hết?
   const canSubmit = isAllAnswered && !submitted;
 
-  // Giao diện tổng
+  // UI tổng
   if (loading) return <Protected><div>Đang tải biểu mẫu...</div></Protected>;
-  if (!round) return <Protected><div>{message}</div></Protected>;
+  if (!round)  return <Protected><div>{message}</div></Protected>;
 
   return (
     <Protected>
@@ -277,30 +317,33 @@ export default function SurveyPage() {
         <h1 className="text-2xl font-bold text-indigo-900 mb-2">
           Khảo sát — Vòng {round.round_number}
         </h1>
-        {/* Block mô tả khảo sát */}
-{round.description && (
-  <div className="w-full max-w-3xl mx-auto mb-6">
-    <div className="flex items-start gap-3 bg-blue-50 border-l-4 border-blue-400 shadow rounded-xl px-6 py-4">
-      <div className="flex-shrink-0 mt-0.5">
-        <svg width="32" height="32" fill="none" viewBox="0 0 32 32">
-          <circle cx="16" cy="16" r="16" fill="#3B82F6" fillOpacity="0.12"/>
-          <path d="M16 10v5m0 4h.01M16 22a6 6 0 100-12 6 6 0 000 12z" stroke="#2563eb" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-        </svg>
-      </div>
-      <div>
-        <div className="font-semibold text-blue-900 mb-1">Hướng dẫn & Thông tin khảo sát</div>
-        <div className="text-blue-800 whitespace-pre-line text-base">
-          {round.description}
-        </div>
-      </div>
-    </div>
-  </div>
-)}
+
+        {/* Mô tả khảo sát */}
+        {round.description && (
+          <div className="w-full max-w-3xl mx-auto mb-6">
+            <div className="flex items-start gap-3 bg-blue-50 border-l-4 border-blue-400 shadow rounded-xl px-6 py-4">
+              <div className="flex-shrink-0 mt-0.5">
+                <svg width="32" height="32" fill="none" viewBox="0 0 32 32">
+                  <circle cx="16" cy="16" r="16" fill="#3B82F6" fillOpacity="0.12"/>
+                  <path d="M16 10v5m0 4h.01M16 22a6 6 0 100-12 6 6 0 000 12z" stroke="#2563eb" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+              </div>
+              <div>
+                <div className="font-semibold text-blue-900 mb-1">Hướng dẫn & Thông tin khảo sát</div>
+                <div className="text-blue-800 whitespace-pre-line text-base">
+                  {round.description}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
         {round.status !== 'active' && (
           <p className="text-red-500 mb-2">
             Vòng này hiện {round.status}. Bạn không thể chỉnh sửa.
           </p>
         )}
+
         {/* Thanh chọn câu hỏi */}
         <div className="flex gap-2 mb-6 flex-wrap justify-center">
           {items.map((it, idx) => (
@@ -315,9 +358,11 @@ export default function SurveyPage() {
             </button>
           ))}
         </div>
-        {/* Hiện từng câu hỏi */}
+
+        {/* Câu hiện tại */}
         {items[curIndex] && renderQuestion(items[curIndex], curIndex)}
-        {/* Nút điều hướng nhỏ */}
+
+        {/* Điều hướng nhỏ */}
         <div className="flex justify-between w-full max-w-3xl mb-6">
           <button
             className="px-4 py-1 rounded-lg border text-sm font-medium text-indigo-700 border-indigo-200 hover:bg-indigo-50"
@@ -336,7 +381,8 @@ export default function SurveyPage() {
             Tiếp tục
           </button>
         </div>
-        {/* Nút gửi bài và lưu nháp lớn, cùng hàng */}
+
+        {/* Nút lưu / gửi */}
         <div className="flex justify-between items-center gap-4 w-full max-w-3xl mx-auto mb-3">
           <button
             onClick={handleSave}
@@ -355,11 +401,13 @@ export default function SurveyPage() {
             Gửi bản cuối
           </button>
         </div>
+
         {!isAllAnswered && !submitted && (
           <div className="text-orange-600 mt-2 font-semibold">
             ⚠️ Bạn cần trả lời tất cả các câu hỏi trước khi gửi bản cuối.
           </div>
         )}
+
         {message && (
           <div className={`mt-4 text-lg font-bold ${submitted ? 'text-green-700' : 'text-indigo-700'}`}>
             {message}
