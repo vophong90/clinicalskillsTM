@@ -121,6 +121,11 @@ export default function SurveyPage() {
           setPrevComments(prevMap);
         }
       }
+      setLoading(false);
+    };
+
+    load();
+  }, [roundId]);
 
   // Thay đổi câu trả lời
   const handleChange = (itemId: string, value: any) => {
