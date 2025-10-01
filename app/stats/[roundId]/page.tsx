@@ -75,6 +75,7 @@ export default function StatsPage() {
         .from('responses')
         .select('item_id, answer_json, is_submitted, user_id')
         .eq('round_id', roundId);
+        .range(0, 999999);
       setResponses(resps ?? []);
       setLoading(false);
     };
