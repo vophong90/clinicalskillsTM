@@ -107,28 +107,27 @@ export default function SurveyPage() {
       // 4.1) LỌC BỎ RESPONSES MỒ CÔI (item đã bị xóa)
       const validItemIds = new Set(safeItems.map(i => i.id));
       const filteredResps = resps.filter(row => validItemIds.has(row.item_id));
-
+      
       // 5) Ánh xạ vào state answer/comment
       const map: Record<string, any> = {};
       const cmtMap: Record<string, string> = {};
-      let wasSubmitted = false;
-
+      const submittedIds = new Set<string>();
+      
       filteredResps.forEach((row) => {
         const a = row.answer_json;
-        // Lưu value/choices "gọn" để binding input
         if (Array.isArray(a?.choices)) map[row.item_id] = a.choices;
         else if (a?.value !== undefined) map[row.item_id] = a.value;
         else map[row.item_id] = a ?? null;
-
+        
         if (typeof a?.comment === 'string' && a.comment.trim() !== '') {
           cmtMap[row.item_id] = a.comment;
         }
-        if (row.is_submitted) wasSubmitted = true;
+        if (row.is_submitted) submittedIds.add(row.item_id);
       });
-
       setAnswers(map);
       setComments(cmtMap);
-      setSubmitted(wasSubmitted);
+      const allSubmittedNow = (safeItems.length > 0) && safeItems.every(it => submittedIds.has(it.id));
+      setSubmitted(allSubmittedNow);
 
       // 6) Nhận xét vòng trước qua RPC (nếu có)
       if (r.round_number > 1) {
