@@ -402,7 +402,7 @@ export default function AdminUserManager() {
 
       {/* ===================== SECTION 2: BẢNG TỔNG HỢP NỘP KHẢO SÁT ===================== */}
       <section>
-        <h3 className="text-2xl font-bold mb-4">📋 Bảng tổng hợp: Thành viên / Project / Vòng / Trạng thái</h3>
+        <h3 className="text-2xl font-bold mb-4">📋 Bảng theo dõi tiến độ tham gia khảo sát</h3>
 
         {/* Bộ lọc */}
         <div className="mb-4 flex flex-wrap items-center gap-3 border p-3 rounded bg-gray-50">
