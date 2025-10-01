@@ -151,52 +151,80 @@ export default function SurveyPage() {
     load();
   }, [roundId]);
 
-  // Helpers thay đổi câu trả lời
-  const handleChange = (itemId: string, value: any) => {
-    setAnswers(prev => ({ ...prev, [itemId]: value }));
-  };
-  const handleCommentChange = (itemId: string, value: string) => {
-    setComments(prev => ({ ...prev, [itemId]: value }));
-  };
-  const toggleMulti = (itemId: string, choice: string) => {
-    setAnswers(prev => {
-      const cur = Array.isArray(prev[itemId]) ? prev[itemId] : [];
-      const exists = cur.includes(choice);
-      const next = exists ? cur.filter((c: string) => c !== choice) : [...cur, choice];
-      return { ...prev, [itemId]: next };
-    });
-  };
+ // ===== Helpers thay đổi câu trả lời =====
+const handleChange = (itemId: string, value: any) => {
+  setAnswers(prev => ({ ...prev, [itemId]: value }));
+};
 
-  // Validate đã trả lời hết (DỰA TRÊN ITEMS HIỆN CÓ)
-  const isAllAnswered = useMemo(() => {
-    return items.every(it => {
-      const v = answers[it.id];
-      if (v === undefined || v === null) return false;
-      return Array.isArray(v) ? v.length > 0 : String(v).trim() !== '';
-    });
-  }, [items, answers]);
+const handleCommentChange = (itemId: string, value: string) => {
+  setComments(prev => ({ ...prev, [itemId]: value }));
+};
 
-  // Lưu / Submit
-  const handleSave = async () => save(false);
-  const handleSubmit = async () => {
-    if (!isAllAnswered) return;
-    await save(true);
-  };
+const toggleMulti = (itemId: string, choice: string) => {
+  setAnswers(prev => {
+    const cur = Array.isArray(prev[itemId]) ? prev[itemId] : [];
+    const exists = cur.includes(choice);
+    const next = exists ? cur.filter((c: string) => c !== choice) : [...cur, choice];
+    return { ...prev, [itemId]: next };
+  });
+};
 
-  // Gộp payload theo items hiện có; khi submit chỉ cập nhật responses của item hợp lệ
-  const save = async (submit: boolean) => {
-    if (!round) return;
-    setMessage('Đang lưu...');
-    const { data: session } = await supabase.auth.getSession();
-    const userId = session.session?.user.id!;
-    const validItemIds = new Set(items.map(i => i.id));
+// ===== Kiểm tra trống/đầy cho 1 câu trả lời =====
+const isEmptyAnswer = (v: any) => {
+  if (v === undefined || v === null) return true;
+  if (Array.isArray(v)) return v.length === 0;
+  if (typeof v === 'string') return v.trim() === ''; // chuỗi rỗng là chưa trả lời
+  return false; // số (kể cả 0) hoặc object hợp lệ
+};
 
-    const payload = items.map(it => {
+// ===== Validate: đã trả lời HẾT tất cả items của vòng hiện tại =====
+const isAllAnswered = useMemo(() => {
+  return items.every(it => !isEmptyAnswer(answers[it.id]));
+}, [items, answers]);
+
+// ===== Lưu / Gửi =====
+const handleSave = async () => save(false);
+
+const handleSubmit = async () => {
+  // vòng phải đang active
+  if (round?.status !== 'active') {
+    setMessage('Vòng này chưa mở hoặc đã đóng. Không thể gửi bản cuối.');
+    return;
+  }
+
+  // phải trả lời đủ 100%
+  const unanswered = items.filter(it => isEmptyAnswer(answers[it.id]));
+  if (unanswered.length > 0) {
+    setMessage(`Bạn còn ${unanswered.length} câu chưa trả lời. Vui lòng hoàn tất trước khi gửi.`);
+    return;
+  }
+
+  await save(true);
+};
+
+// Gộp payload CHỈ từ các item đã có câu trả lời; khi submit bắt buộc đủ
+const save = async (submit: boolean) => {
+  if (!round) return;
+  setMessage('Đang lưu...');
+
+  const { data: session } = await supabase.auth.getSession();
+  const userId = session.session?.user.id!;
+  if (!userId) {
+    setMessage('Không xác định được người dùng.');
+    return;
+  }
+
+  // chỉ build payload cho các item đã có câu trả lời
+  const payload = items
+    .filter(it => !isEmptyAnswer(answers[it.id]))
+    .map(it => {
       const raw = answers[it.id];
       const ans: any = {};
       if (Array.isArray(raw)) ans.choices = raw;
       else if (typeof raw === 'number' || typeof raw === 'string') ans.value = raw;
-      if (comments[it.id]) ans.comment = comments[it.id];
+
+      const cmt = comments[it.id];
+      if (typeof cmt === 'string' && cmt.trim() !== '') ans.comment = cmt.trim();
 
       return {
         round_id: round.id,
@@ -207,19 +235,25 @@ export default function SurveyPage() {
       };
     });
 
-    const { error } = await supabase
-      .from('responses')
-      .upsert(payload, { onConflict: 'round_id,item_id,user_id' });
+  // Phòng hờ: nếu bấm gửi mà payload vẫn thiếu so với tổng số câu => chặn
+  if (submit && payload.length < items.length) {
+    setMessage('Có câu chưa trả lời, không thể gửi bản cuối.');
+    return;
+  }
 
-    setMessage(
-      error ? ('Lỗi lưu: ' + error.message) : (submit ? 'Đã gửi thành công.' : 'Đã lưu nháp.')
-    );
+  const { error } = await supabase
+    .from('responses')
+    .upsert(payload, { onConflict: 'round_id,item_id,user_id' });
 
-    if (!error && submit) {
-      setSubmitted(true);
-      setTimeout(() => router.push('/dashboard'), 1500);
-    }
-  };
+  setMessage(
+    error ? ('Lỗi lưu: ' + error.message) : (submit ? 'Đã gửi thành công.' : 'Đã lưu nháp.')
+  );
+
+  if (!error && submit) {
+    setSubmitted(true);
+    setTimeout(() => router.push('/dashboard'), 1500);
+  }
+};
 
   // Điều hướng
   const goTo = (idx: number) => setCurIndex(idx);
