@@ -34,6 +34,27 @@ const SYSTEM_ROLES = [
   { value: 'external_expert', label: 'Chuyên gia bên ngoài' },
 ];
 
+async function fetchAllResponses(roundId: string): Promise<SurveyResponse[]> {
+  const PAGE = 1000;
+  let from = 0, to = PAGE - 1;
+  const all: SurveyResponse[] = [];
+
+  while (true) {
+    const { data, error } = await supabase
+      .from('responses')
+      .select('id, user_id, round_id, is_submitted')
+      .eq('round_id', roundId)
+      .order('user_id', { ascending: true }) // ổn định phân trang
+      .range(from, to);
+
+    if (error) throw error;
+    all.push(...(data ?? []));
+    if (!data || data.length < PAGE) break; // hết trang
+    from += PAGE; to += PAGE;
+  }
+  return all;
+}
+
 export default function AdminUserManager() {
   // ====== DATA STATE ======
   const [users, setUsers] = useState<UserProfile[]>([]);
@@ -54,25 +75,28 @@ export default function AdminUserManager() {
   const [filterStatus, setFilterStatus] = useState<'Đã nộp' | 'Chưa nộp' | ''>('');
 
   useEffect(() => {
-    (async () => {
-      if (!filterRound) {
-        setResponses([]); // reset nếu chưa chọn vòng
-        return;
+  (async () => {
+    if (!filterRound) {
+      setResponses([]); // reset nếu chưa chọn vòng
+      return;
+    }
+    setLoading(true);
+    let cancelled = false;
+    try {
+      const all = await fetchAllResponses(filterRound);
+      if (!cancelled) setResponses(all);
+    } catch (e: any) {
+      if (!cancelled) {
+        setResponses([]);
+        setMessage('❌ Lỗi tải responses: ' + (e?.message ?? String(e)));
       }
-      setLoading(true);
-      const { data, error } = await supabase
-        .from('responses')
-        .select('id, user_id, round_id, is_submitted')
-        .eq('round_id', filterRound)
-        .range(0, 999999);
-      
-      if (!error) {
-        setResponses((data as SurveyResponse[]) ?? []);
-      }
-      setLoading(false);
-    })();
-  }, [filterRound]);
-
+    } finally {
+      if (!cancelled) setLoading(false);
+    }
+    return () => { cancelled = true; };
+  })();
+}, [filterRound]);
+;
 
   // ====== LOAD DATA ======
   async function loadAll() {
