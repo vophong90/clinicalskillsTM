@@ -107,35 +107,20 @@ export default function SurveyPage() {
       setComments(cmtMap);
       setSubmitted(wasSubmitted);
 
-      // 6. Lấy nhận xét vòng trước
-      if (r.round_number > 1 && userId) {
-        const { data: prevR } = await supabase
-          .from('rounds')
-          .select('id')
-          .eq('project_id', r.project_id)
-          .eq('round_number', r.round_number - 1)
-          .maybeSingle();
-
-        if (prevR?.id) {
-          const { data: prevRs } = await supabase
-            .from('responses')
-            .select('item_id, user_id, answer_json')
-            .eq('round_id', prevR.id);
-
+ // 6. Lấy nhận xét vòng trước qua RPC
+      if (r.round_number > 1) {
+        const { data: rows, error: prevErr } = await supabase
+          .rpc('get_prev_comments', { cur_round_id: r.id });
+        
+        if (!prevErr && rows?.length) {
           const prevMap: Record<string, string[]> = {};
-          prevRs?.forEach((resp: any) => {
-            if (resp.user_id !== userId && resp.answer_json?.comment) {
-              if (!prevMap[resp.item_id]) prevMap[resp.item_id] = [];
-              prevMap[resp.item_id].push(resp.answer_json.comment);
-            }
+          rows.forEach((row: any) => {
+            if (!prevMap[row.current_item_id]) prevMap[row.current_item_id] = [];
+            prevMap[row.current_item_id].push(row.comment);
           });
           setPrevComments(prevMap);
         }
       }
-      setLoading(false);
-    };
-    load();
-  }, [roundId]);
 
   // Thay đổi câu trả lời
   const handleChange = (itemId: string, value: any) => {
