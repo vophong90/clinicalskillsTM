@@ -56,16 +56,17 @@ export default function StatsPage() {
   const [role, setRole] = useState<UserRole | null>(null);
   const [canView, setCanView] = useState(false);
 
-  useEffect(() => {
-    const load = async () => {
-      setLoading(true);
-      // 1. Lấy thông tin user & role
+useEffect(() => {
+  const load = async () => {
+    setLoading(true);
+    let cancelled = false;
+    try {
+      // 1. Lấy thông tin user & role (giữ nguyên logic của bạn)
       const { data: session } = await supabase.auth.getSession();
       const userId = session.session?.user.id;
 
       let userRole: UserRole | null = null;
       if (userId) {
-        // Lấy permission role ở project hiện tại
         const { data: rinfo } = await supabase
           .from('rounds')
           .select('project_id')
@@ -81,26 +82,28 @@ export default function StatsPage() {
             .maybeSingle();
           userRole = per?.role ?? null;
           setRole(userRole);
-          setCanView(userRole === "secretary" || userRole === "viewer" || userRole === "admin");
+          setCanView(userRole === 'secretary' || userRole === 'viewer' || userRole === 'admin');
         }
       }
 
-      // 2. Lấy items của vòng này
+      // 2. Lấy items
       const { data: its } = await supabase
         .from('items')
         .select('id, prompt, type, options_json, item_order')
         .eq('round_id', roundId)
         .order('item_order', { ascending: true });
-      setItems(its ?? []);
+      if (!cancelled) setItems(its ?? []);
 
-      // 3. Lấy tất cả responses
-      const resps = await fetchAllResponsesPaginated(r.id);
-      setResponses(resps ?? []);
-      
-      setLoading(false);
-    };
-    load();
-  }, [roundId]);
+      // 3. Lấy responses PHÂN TRANG — dùng roundId, không phải r.id
+      const resps = await fetchAllResponsesPaginated(roundId);
+      if (!cancelled) setResponses(resps ?? []);
+    } finally {
+      if (!cancelled) setLoading(false);
+    }
+    return () => { cancelled = true; };
+  };
+  load();
+}, [roundId]);
 
   // 4. Tổng hợp dữ liệu
   function summarize(item: Item) {
