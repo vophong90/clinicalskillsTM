@@ -267,7 +267,9 @@ export default function AdminUserManager() {
                 {userRounds.map(ur => {
                   const round = rounds.find(r => r.id === ur.round_id);
                   const project = round && projects.find(p => p.id === round.project_id);
-                  const hasSubmitted = responses.some(res => res.user_id === selectedUserId && res.round_id === ur.round_id);
+                  const hasSubmitted = responses.some(res =>String(res.user_id) === String(selectedUserId) &&
+                    String(res.round_id) === String(ur.round_id) &&
+                    res.is_submitted === true);
                   return (
                     <li key={ur.participant_id} className="flex items-center justify-between bg-gray-50 rounded px-3 py-2">
                       <span>
