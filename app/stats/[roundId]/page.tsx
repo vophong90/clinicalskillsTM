@@ -23,6 +23,29 @@ type ResponseRow = {
 
 type UserRole = "admin" | "secretary" | "viewer" | "core_expert" | "external_expert";
 
+async function fetchAllResponsesPaginated(roundId: string): Promise<ResponseRow[]> {
+  const PAGE = 1000;
+  let from = 0;
+  const all: ResponseRow[] = [];
+
+  while (true) {
+    const to = from + PAGE - 1;
+    const { data, error } = await supabase
+      .from('responses')
+      .select('item_id, answer_json, is_submitted, user_id')
+      .eq('round_id', roundId)
+      .order('user_id', { ascending: true })  // sắp xếp ổn định
+      .order('item_id', { ascending: true })  // sắp xếp ổn định
+      .range(from, to);
+
+    if (error) throw error;
+    all.push(...(data ?? []));
+    if (!data || data.length < PAGE) break; // hết trang
+    from += PAGE;
+  }
+  return all;
+}
+
 export default function StatsPage() {
   const params = useParams();
   const roundId = params?.roundId as string;
@@ -71,12 +94,9 @@ export default function StatsPage() {
       setItems(its ?? []);
 
       // 3. Lấy tất cả responses
-      const { data: resps } = await supabase
-        .from('responses')
-        .select('item_id, answer_json, is_submitted, user_id')
-        .eq('round_id', roundId)
-        .range(0, 999999);
+      const resps = await fetchAllResponsesPaginated(r.id);
       setResponses(resps ?? []);
+      
       setLoading(false);
     };
     load();
