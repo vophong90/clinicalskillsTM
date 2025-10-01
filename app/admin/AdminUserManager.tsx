@@ -53,6 +53,27 @@ export default function AdminUserManager() {
   const [filterRound, setFilterRound] = useState('');
   const [filterStatus, setFilterStatus] = useState<'Đã nộp' | 'Chưa nộp' | ''>('');
 
+  useEffect(() => {
+    (async () => {
+      if (!filterRound) {
+        setResponses([]); // reset nếu chưa chọn vòng
+        return;
+      }
+      setLoading(true);
+      const { data, error } = await supabase
+        .from('responses')
+        .select('id, user_id, round_id, is_submitted')
+        .eq('round_id', filterRound)
+        .range(0, 999999);
+      
+      if (!error) {
+        setResponses((data as SurveyResponse[]) ?? []);
+      }
+      setLoading(false);
+    })();
+  }, [filterRound]);
+
+
   // ====== LOAD DATA ======
   async function loadAll() {
     setLoading(true);
@@ -62,25 +83,24 @@ export default function AdminUserManager() {
       { data: roundsData },
       { data: permissionsData },
       { data: participantsData },
-      { data: responsesData },
     ] = await Promise.all([
       supabase.from('profiles').select('id, email, name, role'),
       supabase.from('projects').select('id, title'),
       supabase.from('rounds').select('id, project_id, round_number'),
       supabase.from('permissions').select('id, user_id, project_id, role'),
       supabase.from('round_participants').select('id, user_id, round_id'),
-      supabase.from('responses').select('id, user_id, round_id, is_submitted'),
     ]);
-
+    
     setUsers((profiles as UserProfile[]) ?? []);
     setProjects((projectsData as Project[]) ?? []);
     setRounds((roundsData as Round[]) ?? []);
     setPermissions((permissionsData as Permission[]) ?? []);
-    setParticipants((participantsData as Participant[]) ?? []);
-    setResponses((responsesData as SurveyResponse[]) ?? []);
+    const pa = (participantsData as Participant[]) ?? [];
+    setParticipants(pa);
+    
     setLoading(false);
   }
-
+  
   useEffect(() => { loadAll(); }, []);
 
   // ====== HELPERS ======
