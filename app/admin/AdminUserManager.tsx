@@ -427,4 +427,67 @@ export default function AdminUserManager() {
             value={filterRound}
             onChange={e => setFilterRound(e.target.value)}
           >
-            <option value="">— Lọc theo Vòng
+            <option value="">— Lọc theo Vòng —</option>
+            {filteredRounds
+              .slice()
+              .sort((a, b) => a.round_number - b.round_number)
+              .map(r => (
+                <option key={r.id} value={r.id}>
+                  {(projects.find(p => p.id === r.project_id)?.title ?? 'Project')} – V{r.round_number}
+                </option>
+              ))}
+          </select>
+
+          <select
+            className="border p-2 rounded min-w-40"
+            value={filterStatus}
+            onChange={e => setFilterStatus(e.target.value as any)}
+          >
+            <option value="">— Lọc theo Trạng thái —</option>
+            <option value="Đã nộp">Đã nộp</option>
+            <option value="Chưa nộp">Chưa nộp</option>
+          </select>
+        </div>
+
+        {/* Bảng */}
+        {loading ? (
+          <div>Đang tải...</div>
+        ) : (
+          <table className="min-w-full border text-sm bg-white shadow">
+            <thead>
+              <tr className="bg-gray-100">
+                <th className="p-2 border">Thành viên</th>
+                <th className="p-2 border">Project</th>
+                <th className="p-2 border">Vòng</th>
+                <th className="p-2 border">Trạng thái</th>
+              </tr>
+            </thead>
+            <tbody>
+              {submissionTable.map((row, idx) => (
+                <tr key={`${row.userId}-${row.roundId}-${idx}`} className="border-t">
+                  <td className="p-2 border">{row.userName}</td>
+                  <td className="p-2 border">{row.projectTitle}</td>
+                  <td className="p-2 border">V{row.roundNumber}</td>
+                  <td className="p-2 border">
+                    {row.status === 'Đã nộp' ? (
+                      <span className="px-2 py-1 rounded bg-green-100 text-green-700">Đã nộp</span>
+                    ) : (
+                      <span className="px-2 py-1 rounded bg-yellow-100 text-yellow-700">Chưa nộp</span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+              {submissionTable.length === 0 && (
+                <tr>
+                  <td className="p-4 text-center text-gray-500" colSpan={4}>
+                    Không có dữ liệu phù hợp bộ lọc.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        )}
+      </section>
+    </div>
+  );
+}
