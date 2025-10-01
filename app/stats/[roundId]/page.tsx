@@ -74,7 +74,7 @@ export default function StatsPage() {
       const { data: resps } = await supabase
         .from('responses')
         .select('item_id, answer_json, is_submitted, user_id')
-        .eq('round_id', roundId);
+        .eq('round_id', roundId)
         .range(0, 999999);
       setResponses(resps ?? []);
       setLoading(false);
