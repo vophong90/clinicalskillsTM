@@ -210,7 +210,30 @@ export default function AdminUserManager() {
         status: hasSubmitted ? 'Đã nộp' as const : 'Chưa nộp' as const,
       };
     });
-
+    
+    const seen = new Set(rows.map(r => `${r.userId}:${r.roundId}`));
+    
+    responses.forEach(resp => {
+      if (resp.is_submitted) {
+        const key = `${resp.user_id}:${resp.round_id}`;
+        if (!seen.has(key)) {
+          const round = rounds.find(r => r.id === resp.round_id);
+          const project = round ? projects.find(p => p.id === round.project_id) : undefined;
+          const user = users.find(u => u.id === resp.user_id);
+          rows.push({
+            userId: resp.user_id,
+            userName: user?.name || user?.email || '',
+            projectId: project?.id || '',
+            projectTitle: project?.title || '',
+            roundId: round?.id || '',
+            roundNumber: round?.round_number || 0,
+            status: 'Đã nộp' as const,
+          });
+          seen.add(key);
+        }
+      }
+    });
+    
     return rows.filter(r => {
       if (filterProject && r.projectId !== filterProject) return false;
       if (filterRound && r.roundId !== filterRound) return false;
