@@ -33,7 +33,7 @@ type ResponseRow = {
 type UserRole = "admin" | "secretary" | "viewer" | "core_expert" | "external_expert";
 
 // Nếu bảng dự án dùng 'title' thì đổi name -> title ở cả type + query + render
-type Project = { id: string; name: string };
+type Project = { id: string; title: string };
 
 // ==== HÀM TÍNH TOÁN ====
 function calcConsensus(counts: Record<string, number>, total: number): { consensus: number, consensusOpt: string } {
@@ -196,7 +196,7 @@ export default function ProjectStatsPage() {
       {
         const { data: proj } = await supabase
           .from('projects')
-          .select('id, name') // nếu schema dùng 'title' thì đổi thành 'id, title'
+          .select('id, title') // nếu schema dùng 'title' thì đổi thành 'id, title'
           .eq('id', projectId)
           .maybeSingle();
         setProject(proj ?? null);
@@ -315,7 +315,7 @@ export default function ProjectStatsPage() {
     wb.Sheets["Thống kê"] = XLSX.utils.json_to_sheet(ws1);
     wb.Sheets["Ý kiến mở"] = XLSX.utils.json_to_sheet(ws2);
 
-    const safeName = (project?.name || projectId).replace(/[\\/:*?"<>|]/g, '_');
+    const safeName = (project?.title || projectId).replace(/[\\/:*?"<>|]/g, '_');
     XLSX.writeFile(wb, `thong_ke_project_${safeName}.xlsx`);
   };
 
@@ -328,7 +328,7 @@ export default function ProjectStatsPage() {
       <div className="min-h-screen bg-gray-50 px-4 py-8">
         <h1 className="text-2xl font-bold text-indigo-800 mb-2">Thống kê các vòng khảo sát (đầy đủ chỉ số)</h1>
         <div className="mb-4 text-gray-600">
-          Dự án <b>{project?.name ?? projectId}</b> có <b>{rounds.length}</b> vòng khảo sát.
+          Dự án <b>{project?.title ?? projectId}</b> có <b>{rounds.length}</b> vòng khảo sát.
         </div>
         <button
           className="mb-6 bg-green-600 hover:bg-green-700 text-white px-6 py-2 rounded-lg font-semibold shadow"
