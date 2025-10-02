@@ -368,7 +368,7 @@ export default function SurveyPage() {
         </div>
 
         {/* Kết quả tổng hợp vòng trước (nếu có) */}
-        {round?.round_number > 1 && prevAgg[it.id] && (
+        {((round?.round_number ?? 0) > 1 && !!prevAgg[it.id]) && (
           <div className="bg-amber-50 border-l-4 border-amber-400 p-3 mb-2 text-sm text-amber-800 rounded">
             <div className="font-semibold">
               Kết quả vòng trước:
