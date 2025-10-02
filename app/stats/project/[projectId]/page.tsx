@@ -150,23 +150,24 @@ export default function ProjectStatsPage() {
   const [responses, setResponses] = useState<ResponseRow[]>([]);
 
   // ==== LOAD DATA ====
-  async function fetchAll<T>(
-    pageQuery: (from: number, to: number) => Promise<{ data: T[] | null; error: any }>,
-    pageSize = 1000
-  ): Promise<T[]> {
-    let all: T[] = [];
-    let from = 0;
-    while (true) {
-      const to = from + pageSize - 1;
-      const { data, error } = await pageQuery(from, to);
-      if (error) throw error;
-      const chunk = data ?? [];
-      all = all.concat(chunk);
-      if (chunk.length < pageSize) break; // hết dữ liệu
-      from += pageSize;
-    }
-    return all;
+ // Helper: lấy tất cả bản ghi theo lô (tránh giới hạn 1000 dòng)
+async function fetchAll<T>(
+  pageQuery: (from: number, to: number) => Promise<{ data: T[] | null; error: any }>,
+  pageSize = 1000
+): Promise<T[]> {
+  let all: T[] = [];
+  let from = 0;
+  while (true) {
+    const to = from + pageSize - 1;
+    const { data, error } = await pageQuery(from, to);
+    if (error) throw error;
+    const chunk = data ?? [];
+    all = all.concat(chunk);
+    if (chunk.length < pageSize) break;
+    from += pageSize;
   }
+  return all;
+}
 
 useEffect(() => {
   const load = async () => {
@@ -184,48 +185,51 @@ useEffect(() => {
         .maybeSingle();
       userRole = per?.role ?? null;
       setRole(userRole);
-      setCanView(userRole === "secretary" || userRole === "viewer" || userRole === "admin");
+      setCanView(userRole === 'secretary' || userRole === 'viewer' || userRole === 'admin');
     }
 
-    // Rounds (phân trang để an toàn)
-    const rds = await fetchAll<Round>((from, to) =>
-      supabase
+    // Rounds (bọc truy vấn trong async để trả Promise<{data,error}>)
+    const rds = await fetchAll<Round>(async (from, to) => {
+      const { data, error } = await supabase
         .from('rounds')
         .select('id, round_number, status')
         .eq('project_id', projectId)
-        .order('round_number', { ascending: true }) // giữ thứ tự ổn định
-        .range(from, to)
-    );
+        .order('round_number', { ascending: true })
+        .range(from, to);
+      return { data, error };
+    });
     setRounds(rds);
     const roundIds = rds.map(r => r.id);
 
-    // Items (phân trang + order ổn định)
+    // Items
     let its: Item[] = [];
     if (roundIds.length > 0) {
-      its = await fetchAll<Item>((from, to) =>
-        supabase
+      its = await fetchAll<Item>(async (from, to) => {
+        const { data, error } = await supabase
           .from('items')
           .select('id, prompt, type, options_json, item_order, round_id')
           .in('round_id', roundIds)
           .order('round_id', { ascending: true })
           .order('item_order', { ascending: true })
-          .order('id', { ascending: true }) // rất quan trọng khi phân trang
-          .range(from, to)
-      );
+          .order('id', { ascending: true }) // dùng khóa đơn điệu để phân trang ổn định
+          .range(from, to);
+        return { data, error };
+      });
     }
     setItems(its);
 
-    // Responses (thường lớn nhất → bắt buộc phân trang + order ổn định)
+    // Responses (thường lớn nhất → phân trang + order ổn định)
     let resps: ResponseRow[] = [];
     if (roundIds.length > 0) {
-      resps = await fetchAll<ResponseRow>((from, to) =>
-        supabase
+      resps = await fetchAll<ResponseRow>(async (from, to) => {
+        const { data, error } = await supabase
           .from('responses')
           .select('item_id, answer_json, is_submitted, user_id, round_id')
           .in('round_id', roundIds)
-          .order('id', { ascending: true }) // order theo khóa đơn điệu để tránh thiếu/trùng
-          .range(from, to)
-      );
+          .order('id', { ascending: true }) // nếu bảng không có 'id', đổi sang 'created_at'
+          .range(from, to);
+        return { data, error };
+      });
     }
     setResponses(resps);
 
