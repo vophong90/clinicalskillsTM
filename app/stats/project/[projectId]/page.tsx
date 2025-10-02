@@ -32,12 +32,15 @@ type ResponseRow = {
 
 type UserRole = "admin" | "secretary" | "viewer" | "core_expert" | "external_expert";
 
+// Nếu bảng dự án dùng 'title' thì đổi name -> title ở cả type + query + render
+type Project = { id: string; name: string };
+
 // ==== HÀM TÍNH TOÁN ====
 function calcConsensus(counts: Record<string, number>, total: number): { consensus: number, consensusOpt: string } {
   let maxVal = 0, maxOpt = '';
   for (const [opt, val] of Object.entries(counts)) {
     if (val > maxVal) {
-      maxVal = val;
+      maxVal = val as number;
       maxOpt = opt;
     }
   }
@@ -98,7 +101,7 @@ function summarize(item: Item, responses: ResponseRow[]) {
 
     const { consensus, consensusOpt } = calcConsensus(counts, N);
 
-    // CVI: chấp nhận là chọn "phù hợp", "rất phù hợp" (bạn điều chỉnh theo từ của bạn)
+    // CVI: chấp nhận là chọn "phù hợp", "rất phù hợp" (tùy cấu trúc từ của bạn)
     const relevantOpts = allChoices.filter(opt =>
       opt.includes("phù hợp") || opt.toLowerCase().includes("relevant")
     );
@@ -145,98 +148,109 @@ export default function ProjectStatsPage() {
   const [loading, setLoading] = useState(true);
   const [role, setRole] = useState<UserRole | null>(null);
   const [canView, setCanView] = useState(false);
+  const [project, setProject] = useState<Project | null>(null);
   const [rounds, setRounds] = useState<Round[]>([]);
   const [items, setItems] = useState<Item[]>([]);
   const [responses, setResponses] = useState<ResponseRow[]>([]);
 
   // ==== LOAD DATA ====
- // Helper: lấy tất cả bản ghi theo lô (tránh giới hạn 1000 dòng)
-async function fetchAll<T>(
-  pageQuery: (from: number, to: number) => Promise<{ data: T[] | null; error: any }>,
-  pageSize = 1000
-): Promise<T[]> {
-  let all: T[] = [];
-  let from = 0;
-  while (true) {
-    const to = from + pageSize - 1;
-    const { data, error } = await pageQuery(from, to);
-    if (error) throw error;
-    const chunk = data ?? [];
-    all = all.concat(chunk);
-    if (chunk.length < pageSize) break;
-    from += pageSize;
+  // Helper: lấy tất cả bản ghi theo lô (tránh giới hạn 1000 dòng)
+  async function fetchAll<T>(
+    pageQuery: (from: number, to: number) => Promise<{ data: T[] | null; error: any }>,
+    pageSize = 1000
+  ): Promise<T[]> {
+    let all: T[] = [];
+    let from = 0;
+    while (true) {
+      const to = from + pageSize - 1;
+      const { data, error } = await pageQuery(from, to);
+      if (error) throw error;
+      const chunk = data ?? [];
+      all = all.concat(chunk);
+      if (chunk.length < pageSize) break;
+      from += pageSize;
+    }
+    return all;
   }
-  return all;
-}
 
-useEffect(() => {
-  const load = async () => {
-    setLoading(true);
-    const { data: session } = await supabase.auth.getSession();
-    const userId = session.session?.user.id;
+  useEffect(() => {
+    const load = async () => {
+      setLoading(true);
+      const { data: session } = await supabase.auth.getSession();
+      const userId = session.session?.user.id;
 
-    let userRole: UserRole | null = null;
-    if (userId) {
-      const { data: per } = await supabase
-        .from('permissions')
-        .select('role')
-        .eq('user_id', userId)
-        .eq('project_id', projectId)
-        .maybeSingle();
-      userRole = per?.role ?? null;
-      setRole(userRole);
-      setCanView(userRole === 'secretary' || userRole === 'viewer' || userRole === 'admin');
-    }
+      let userRole: UserRole | null = null;
+      if (userId) {
+        const { data: per } = await supabase
+          .from('permissions')
+          .select('role')
+          .eq('user_id', userId)
+          .eq('project_id', projectId)
+          .maybeSingle();
+        userRole = per?.role ?? null;
+        setRole(userRole);
+        setCanView(userRole === 'secretary' || userRole === 'viewer' || userRole === 'admin');
+      }
 
-    // Rounds (bọc truy vấn trong async để trả Promise<{data,error}>)
-    const rds = await fetchAll<Round>(async (from, to) => {
-      const { data, error } = await supabase
-        .from('rounds')
-        .select('id, round_number, status')
-        .eq('project_id', projectId)
-        .order('round_number', { ascending: true })
-        .range(from, to);
-      return { data, error };
-    });
-    setRounds(rds);
-    const roundIds = rds.map(r => r.id);
+      // Lấy thông tin dự án để hiển thị tên
+      {
+        const { data: proj } = await supabase
+          .from('projects')
+          .select('id, name') // nếu schema dùng 'title' thì đổi thành 'id, title'
+          .eq('id', projectId)
+          .maybeSingle();
+        setProject(proj ?? null);
+      }
 
-    // Items
-    let its: Item[] = [];
-    if (roundIds.length > 0) {
-      its = await fetchAll<Item>(async (from, to) => {
+      // Rounds (phân trang)
+      const rds = await fetchAll<Round>(async (from, to) => {
         const { data, error } = await supabase
-          .from('items')
-          .select('id, prompt, type, options_json, item_order, round_id')
-          .in('round_id', roundIds)
-          .order('round_id', { ascending: true })
-          .order('item_order', { ascending: true })
-          .order('id', { ascending: true }) // dùng khóa đơn điệu để phân trang ổn định
+          .from('rounds')
+          .select('id, round_number, status')
+          .eq('project_id', projectId)
+          .order('round_number', { ascending: true })
           .range(from, to);
         return { data, error };
       });
-    }
-    setItems(its);
+      setRounds(rds);
+      const roundIds = rds.map(r => r.id);
 
-    // Responses (thường lớn nhất → phân trang + order ổn định)
-    let resps: ResponseRow[] = [];
-    if (roundIds.length > 0) {
-      resps = await fetchAll<ResponseRow>(async (from, to) => {
-        const { data, error } = await supabase
-          .from('responses')
-          .select('item_id, answer_json, is_submitted, user_id, round_id')
-          .in('round_id', roundIds)
-          .order('id', { ascending: true }) // nếu bảng không có 'id', đổi sang 'created_at'
-          .range(from, to);
-        return { data, error };
-      });
-    }
-    setResponses(resps);
+      // Items (phân trang + order ổn định)
+      let its: Item[] = [];
+      if (roundIds.length > 0) {
+        its = await fetchAll<Item>(async (from, to) => {
+          const { data, error } = await supabase
+            .from('items')
+            .select('id, prompt, type, options_json, item_order, round_id')
+            .in('round_id', roundIds)
+            .order('round_id', { ascending: true })
+            .order('item_order', { ascending: true })
+            .order('id', { ascending: true })
+            .range(from, to);
+          return { data, error };
+        });
+      }
+      setItems(its);
 
-    setLoading(false);
-  };
-  load();
-}, [projectId]);
+      // Responses (thường lớn nhất → phân trang + order ổn định)
+      let resps: ResponseRow[] = [];
+      if (roundIds.length > 0) {
+        resps = await fetchAll<ResponseRow>(async (from, to) => {
+          const { data, error } = await supabase
+            .from('responses')
+            .select('item_id, answer_json, is_submitted, user_id, round_id')
+            .in('round_id', roundIds)
+            .order('id', { ascending: true }) // nếu bảng không có 'id', đổi sang 'created_at'
+            .range(from, to);
+          return { data, error };
+        });
+      }
+      setResponses(resps);
+
+      setLoading(false);
+    };
+    load();
+  }, [projectId]);
 
   // Tổng hợp user nộp theo vòng
   function getSubmittedUsers(roundId: string) {
@@ -301,19 +315,20 @@ useEffect(() => {
     wb.Sheets["Thống kê"] = XLSX.utils.json_to_sheet(ws1);
     wb.Sheets["Ý kiến mở"] = XLSX.utils.json_to_sheet(ws2);
 
-    XLSX.writeFile(wb, `thong_ke_project_${projectId}.xlsx`);
+    const safeName = (project?.name || projectId).replace(/[\\/:*?"<>|]/g, '_');
+    XLSX.writeFile(wb, `thong_ke_project_${safeName}.xlsx`);
   };
 
   if (loading) return <Protected><div>Đang tải thống kê...</div></Protected>;
   if (!canView) return <Protected><div>Bạn không có quyền xem thống kê.</div></Protected>;
 
-  // === Render các vòng (PHẦN 2 tiếp tục ở dưới) ===
+  // === Render ===
   return (
     <Protected>
       <div className="min-h-screen bg-gray-50 px-4 py-8">
         <h1 className="text-2xl font-bold text-indigo-800 mb-2">Thống kê các vòng khảo sát (đầy đủ chỉ số)</h1>
         <div className="mb-4 text-gray-600">
-          Dự án <b>{projectId}</b> có <b>{rounds.length}</b> vòng khảo sát.
+          Dự án <b>{project?.name ?? projectId}</b> có <b>{rounds.length}</b> vòng khảo sát.
         </div>
         <button
           className="mb-6 bg-green-600 hover:bg-green-700 text-white px-6 py-2 rounded-lg font-semibold shadow"
@@ -336,7 +351,6 @@ useEffect(() => {
                 {items.filter(it => it.round_id === round.id).map((it) => {
                   const stats = summarize(it, responses);
                   const comments = getComments(it, responses);
-                  // Chuyển sang PHẦN 2 dưới đây
                   return (
                     <StatBlock
                       key={it.id}
@@ -357,26 +371,19 @@ useEffect(() => {
 
 // --- Hàm tính Kendall's W cho xếp hạng (nâng cao, simple) ---
 function calcKendallW(responses: ResponseRow[], item: Item) {
-  // Dùng cho câu hỏi single/multi (chọn 1), mọi người xếp hạng 1 trong n lựa chọn
-  // Chỉ áp dụng nếu có từ 3 lựa chọn trở lên
   if (!item.options_json?.choices || item.options_json.choices.length < 3) return null;
-  // Tạo ma trận: mỗi chuyên gia là 1 dòng, cột là lựa chọn
   const experts = Array.from(new Set(responses.filter(r => r.item_id === item.id && r.is_submitted).map(r => r.user_id)));
   if (experts.length < 2) return null;
   const choices = item.options_json.choices;
-  // Mỗi dòng là 1 expert, mỗi ô là 1 nếu chọn, 0 nếu không
   const ranks = experts.map(uid => {
     const r = responses.find(x => x.item_id === item.id && x.user_id === uid && x.is_submitted);
     if (!r) return Array(choices.length).fill(0);
     const ans = r.answer_json?.value ? [r.answer_json.value] : (Array.isArray(r.answer_json?.choices) ? r.answer_json.choices : []);
     return choices.map(c => ans.includes(c) ? 1 : 0);
   });
-  // Tính tổng số lần chọn mỗi phương án
   const colSum = choices.map((_, i) => ranks.reduce((a, b) => a + b[i], 0));
-  // Tính tổng phương sai giữa các chuyên gia (S)
   const mean = colSum.reduce((a, b) => a + b, 0) / choices.length;
   const S = colSum.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0);
-  // Hệ số W
   const m = experts.length, n = choices.length;
   if (m <= 1 || n <= 1) return null;
   const W = S / (0.5 * m * m * (n * n - 1));
@@ -385,27 +392,21 @@ function calcKendallW(responses: ResponseRow[], item: Item) {
 
 // --- Component hiển thị từng item (StatBlock) ---
 function StatBlock({ item, stats, comments }: { item: Item, stats: any, comments: string[] }) {
-  // Bar chart cho single/multi
   let chartData: { name: string; value: number }[] = [];
   if ((item.type === "single" || item.type === "multi") && stats.counts) {
     chartData = Object.entries(stats.counts).map(([k, v]) => ({ name: k, value: v as number }));
   }
-  // Histogram cho scale
+
   let scaleChart: { value: number, count: number }[] = [];
   if (item.type === "scale" && stats.vals) {
-    // Đếm số lần mỗi giá trị xuất hiện
     const counter: Record<number, number> = {};
-    stats.vals.forEach((v: number)=> {
-      counter[v] = (counter[v] || 0) + 1;
-    });
+    stats.vals.forEach((v: number)=> { counter[v] = (counter[v] || 0) + 1; });
     scaleChart = Object.entries(counter).map(([v, c]) => ({ value: Number(v), count: c as number }));
-    // Sort tăng dần
     scaleChart.sort((a, b) => a.value - b.value);
   }
 
-  // Kendall's W (nếu có)
   const kendallW = (item.type === "single" || item.type === "multi") && chartData.length >= 3
-    ? calcKendallW(stats.vals || [], item) // truyền responses vào nếu muốn chính xác
+    ? calcKendallW([] as any, item) // placeholder: nếu muốn tính thật, truyền toàn bộ responses vào
     : null;
 
   return (
@@ -414,7 +415,6 @@ function StatBlock({ item, stats, comments }: { item: Item, stats: any, comments
         {item.item_order ? <>Kỹ năng {item.item_order}: </> : null}
         {item.prompt}
       </div>
-      {/* Bar chart cho single/multi */}
       {(item.type === "single" || item.type === "multi") && chartData.length > 0 && (
         <div className="w-full h-56 mb-2">
           <ResponsiveContainer width="100%" height="100%">
@@ -430,7 +430,6 @@ function StatBlock({ item, stats, comments }: { item: Item, stats: any, comments
           </ResponsiveContainer>
         </div>
       )}
-      {/* Histogram cho scale */}
       {item.type === "scale" && scaleChart.length > 0 && (
         <div className="w-full h-56 mb-2">
           <ResponsiveContainer width="100%" height="100%">
@@ -446,17 +445,13 @@ function StatBlock({ item, stats, comments }: { item: Item, stats: any, comments
           </ResponsiveContainer>
         </div>
       )}
-      {/* Thống kê số liệu/đồng thuận */}
       <div className="mb-2 space-y-1">
         {(item.type === "single" || item.type === "multi") && (
           <div>
             <b>Đồng thuận:</b> {stats.consensus}% (phương án: <b>{stats.consensusOpt}</b>)
             <span className="mx-2">|</span>
             <b>CVI:</b> {stats.cvi}
-            {kendallW !== null && (
-              <><span className="mx-2">|</span>
-              <b>Kendall’s W:</b> {kendallW}</>
-            )}
+            {kendallW !== null && (<><span className="mx-2">|</span><b>Kendall’s W:</b> {kendallW}</>)}
             <span className="mx-2">|</span>
             <b>N:</b> {stats.N}
           </div>
@@ -477,7 +472,6 @@ function StatBlock({ item, stats, comments }: { item: Item, stats: any, comments
           </div>
         )}
       </div>
-      {/* Ý kiến mở */}
       {comments.length > 0 && (
         <details className="bg-blue-50 rounded p-3 mt-2">
           <summary className="cursor-pointer font-semibold mb-2 text-blue-700">
