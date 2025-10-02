@@ -229,14 +229,13 @@ export default function SurveyPage() {
 
           // 7.5) Tính % đồng thuận cho từng item hiện tại dựa trên item vòng trước có cùng item_order
           const agg: PrevAgg = {};
-          for (const [order, curItem] of curByOrder.entries()) {
+          for (const [order, curItem] of Array.from(curByOrder.entries())) {
             const pItem = prevByOrder.get(order);
             if (!pItem) continue;
             const rows = respByPrevItem.get(pItem.id) ?? [];
             const { N, pctAgree } = computePrevAgree(pItem, rows);
             agg[curItem.id] = { N, pctAgree };
           }
-
           setPrevAgg(agg);
         }
       }
