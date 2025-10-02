@@ -405,34 +405,38 @@ export default function SurveyPage() {
           <span className="text-sm text-gray-400 font-semibold">Câu {idx + 1}/{items.length}</span>
           <span className="font-bold text-lg text-indigo-800 flex-1">{it.prompt}</span>
         </div>
-
+        
         {/* Kết quả tổng hợp vòng trước (nếu có) */}
         {showPrevBox && (
-          <div className="bg-amber-50 border-l-4 border-amber-400 p-3 mb-2 text-sm text-amber-800 rounded">
-            {it.type === 'scale' && typeof prevAgg[it.id].pctAgree === 'number' ? (
-              <div className="font-semibold">
-                Kết quả vòng trước:
-                <span className="ml-1">Đồng thuận {prevAgg[it.id].pctAgree}%</span>
-                <span className="ml-2 text-amber-700">({prevAgg[it.id].N} phản hồi)</span>
-              </div>
-            ) : (it.type === 'single' || it.type === 'multi') && prevAgg[it.id].optionPct ? (
-              <div>
-                <div className="font-semibold mb-1">
-                  Kết quả vòng trước ({prevAgg[it.id].N} phản hồi):
-                </div>
-                <ul className="list-disc ml-5">
-                  {Object.entries(prevAgg[it.id].optionPct).map(([opt, pct]) => (
-                    <li key={opt}><b>{opt}</b>: {pct}%</li>
-                  ))}
-                </ul>
-              </div>
-            ) : (
-              <div className="font-semibold">
-                Kết quả vòng trước: (không có số liệu định lượng)
-              </div>
-            )}
+        <div className="bg-amber-50 border-l-4 border-amber-400 p-3 mb-2 text-sm text-amber-800 rounded">
+          {it.type === 'scale' && typeof prevAgg[it.id]?.pctAgree === 'number' ? (
+          <div className="font-semibold">
+            Kết quả vòng trước:
+            <span className="ml-1">Đồng thuận {prevAgg[it.id]!.pctAgree}%</span>
+            <span className="ml-2 text-amber-700">({prevAgg[it.id]!.N} phản hồi)</span>
+          </div>
+        ) : (it.type === 'single' || it.type === 'multi') ? (
+          <div>
+            <div className="font-semibold mb-1">
+              Kết quả vòng trước ({prevAgg[it.id]?.N ?? 0} phản hồi):
+            </div>
+            <ul className="list-disc ml-5">
+              {Object.entries((prevAgg[it.id]?.optionPct ?? {}) as Record<string, number>).map(
+            ([opt, pct]) => (
+              <li key={opt}>
+                <b>{opt}</b>: {pct}%
+              </li>
+            )
+          )}
+            </ul>
+          </div>
+        ) : (
+          <div className="font-semibold">
+            Kết quả vòng trước: (không có số liệu định lượng)
           </div>
         )}
+        </div>
+      )}
 
         {/* Ý kiến chuyên gia vòng trước */}
         {prevComments[it.id]?.length > 0 && (
