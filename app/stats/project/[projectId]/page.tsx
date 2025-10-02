@@ -150,62 +150,89 @@ export default function ProjectStatsPage() {
   const [responses, setResponses] = useState<ResponseRow[]>([]);
 
   // ==== LOAD DATA ====
-  useEffect(() => {
-    const load = async () => {
-      setLoading(true);
-      const { data: session } = await supabase.auth.getSession();
-      const userId = session.session?.user.id;
+  async function fetchAll<T>(
+    pageQuery: (from: number, to: number) => Promise<{ data: T[] | null; error: any }>,
+    pageSize = 1000
+  ): Promise<T[]> {
+    let all: T[] = [];
+    let from = 0;
+    while (true) {
+      const to = from + pageSize - 1;
+      const { data, error } = await pageQuery(from, to);
+      if (error) throw error;
+      const chunk = data ?? [];
+      all = all.concat(chunk);
+      if (chunk.length < pageSize) break; // hết dữ liệu
+      from += pageSize;
+    }
+    return all;
+  }
 
-      let userRole: UserRole | null = null;
-      if (userId) {
-        const { data: per } = await supabase
-          .from('permissions')
-          .select('role')
-          .eq('user_id', userId)
-          .eq('project_id', projectId)
-          .maybeSingle();
-        userRole = per?.role ?? null;
-        setRole(userRole);
-        setCanView(userRole === "secretary" || userRole === "viewer" || userRole === "admin");
-      }
+useEffect(() => {
+  const load = async () => {
+    setLoading(true);
+    const { data: session } = await supabase.auth.getSession();
+    const userId = session.session?.user.id;
 
-      // Rounds
-      const { data: rds } = await supabase
+    let userRole: UserRole | null = null;
+    if (userId) {
+      const { data: per } = await supabase
+        .from('permissions')
+        .select('role')
+        .eq('user_id', userId)
+        .eq('project_id', projectId)
+        .maybeSingle();
+      userRole = per?.role ?? null;
+      setRole(userRole);
+      setCanView(userRole === "secretary" || userRole === "viewer" || userRole === "admin");
+    }
+
+    // Rounds (phân trang để an toàn)
+    const rds = await fetchAll<Round>((from, to) =>
+      supabase
         .from('rounds')
         .select('id, round_number, status')
         .eq('project_id', projectId)
-        .order('round_number', { ascending: true });
-      setRounds(rds ?? []);
-      const roundIds = (rds ?? []).map(r => r.id);
+        .order('round_number', { ascending: true }) // giữ thứ tự ổn định
+        .range(from, to)
+    );
+    setRounds(rds);
+    const roundIds = rds.map(r => r.id);
 
-      // Items
-      let its: Item[] = [];
-      if (roundIds.length > 0) {
-        const { data: itsData } = await supabase
+    // Items (phân trang + order ổn định)
+    let its: Item[] = [];
+    if (roundIds.length > 0) {
+      its = await fetchAll<Item>((from, to) =>
+        supabase
           .from('items')
           .select('id, prompt, type, options_json, item_order, round_id')
           .in('round_id', roundIds)
           .order('round_id', { ascending: true })
-          .order('item_order', { ascending: true });
-        its = itsData ?? [];
-      }
-      setItems(its);
+          .order('item_order', { ascending: true })
+          .order('id', { ascending: true }) // rất quan trọng khi phân trang
+          .range(from, to)
+      );
+    }
+    setItems(its);
 
-      // Responses
-      let resps: ResponseRow[] = [];
-      if (roundIds.length > 0) {
-        const { data: respData } = await supabase
+    // Responses (thường lớn nhất → bắt buộc phân trang + order ổn định)
+    let resps: ResponseRow[] = [];
+    if (roundIds.length > 0) {
+      resps = await fetchAll<ResponseRow>((from, to) =>
+        supabase
           .from('responses')
           .select('item_id, answer_json, is_submitted, user_id, round_id')
-          .in('round_id', roundIds);
-        resps = respData ?? [];
-      }
-      setResponses(resps);
+          .in('round_id', roundIds)
+          .order('id', { ascending: true }) // order theo khóa đơn điệu để tránh thiếu/trùng
+          .range(from, to)
+      );
+    }
+    setResponses(resps);
 
-      setLoading(false);
-    };
-    load();
-  }, [projectId]);
+    setLoading(false);
+  };
+  load();
+}, [projectId]);
 
   // Tổng hợp user nộp theo vòng
   function getSubmittedUsers(roundId: string) {
