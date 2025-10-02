@@ -37,6 +37,9 @@ type RespRow = {
   is_submitted: boolean;
 };
 
+// Thống kê vòng trước cho mỗi item hiện tại
+type PrevAgg = Record<string, { N: number; pctAgree: number }>;
+
 export default function SurveyPage() {
   const params = useParams();
   const router = useRouter();
@@ -47,10 +50,49 @@ export default function SurveyPage() {
   const [answers, setAnswers] = useState<Record<string, any>>({});
   const [comments, setComments] = useState<Record<string, string>>({});
   const [prevComments, setPrevComments] = useState<Record<string, string[]>>({});
+  const [prevAgg, setPrevAgg] = useState<PrevAgg>({}); // <-- thêm state thống kê vòng trước
   const [curIndex, setCurIndex] = useState(0);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState<string>('');
   const [submitted, setSubmitted] = useState(false);
+
+  // Helper: tính % đồng thuận từ responses vòng trước cho 1 item
+  const computePrevAgree = (item: Item, rows: RespRow[]) => {
+    const submittedRows = rows.filter(r => r.is_submitted);
+    const N = submittedRows.length;
+    if (N === 0) return { N: 0, pctAgree: 0 };
+
+    if (item.type === 'scale') {
+      const vals: number[] = [];
+      submittedRows.forEach(r => {
+        const v = Number(r.answer_json?.value);
+        if (!Number.isNaN(v)) vals.push(v);
+      });
+      const scaleMax = item.options_json?.scale_max ?? 5;
+      const cut = scaleMax >= 5 ? 4 : 3; // ngưỡng đồng thuận mặc định
+      const agree = vals.filter(v => v >= cut).length;
+      return { N, pctAgree: Math.round((agree / N) * 100) };
+    }
+
+    if (item.type === 'single' || item.type === 'multi') {
+      const choices = item.options_json?.choices ?? [];
+      const agreeOpts = choices.filter(opt =>
+        opt.includes('phù hợp') ||
+        opt.toLowerCase().includes('relevant') ||
+        opt.toLowerCase().includes('đồng ý')
+      );
+      let agreeCount = 0;
+      submittedRows.forEach(r => {
+        const a = r.answer_json;
+        const arr = Array.isArray(a?.choices) ? a.choices : (a?.value ? [a.value] : []);
+        if (arr.some((c: string) => agreeOpts.includes(c))) agreeCount++;
+      });
+      return { N, pctAgree: Math.round((agreeCount / N) * 100) };
+    }
+
+    // text: không có đồng thuận định lượng
+    return { N, pctAgree: 0 };
+  };
 
   // Load dữ liệu
   useEffect(() => {
@@ -144,115 +186,170 @@ export default function SurveyPage() {
         }
       }
 
+      // 7) Thống kê vòng trước (tỷ lệ đồng thuận & N) — chỉ khi > 1
+      if (r.round_number > 1) {
+        // 7.1) Vòng trước cùng project
+        const { data: prevRound } = await supabase
+          .from('rounds')
+          .select('id, round_number')
+          .eq('project_id', r.project_id)
+          .eq('round_number', r.round_number - 1)
+          .maybeSingle();
+
+        if (prevRound?.id) {
+          // 7.2) Items vòng trước + responses vòng trước (đã nộp)
+          const [{ data: prevItems }, { data: prevResps }] = await Promise.all([
+            supabase
+              .from('items')
+              .select('id,prompt,options_json,type,item_order,project_id,round_id')
+              .eq('round_id', prevRound.id)
+              .order('item_order', { ascending: true }),
+            supabase
+              .from('responses')
+              .select('item_id, answer_json, is_submitted')
+              .eq('round_id', prevRound.id)
+              .eq('is_submitted', true)
+              .range(0, 999999),
+          ]);
+
+          // 7.3) Map theo item_order giữa vòng trước ↔ vòng hiện tại
+          const curByOrder = new Map<number, Item>();
+          safeItems.forEach(i => curByOrder.set(i.item_order, i));
+
+          const prevByOrder = new Map<number, Item>();
+          (prevItems ?? []).forEach(i => prevByOrder.set(i.item_order, i));
+
+          // 7.4) Gom responses theo item vòng trước
+          const respByPrevItem = new Map<string, RespRow[]>();
+          (prevResps ?? []).forEach(row => {
+            const arr = respByPrevItem.get(row.item_id) ?? [];
+            arr.push(row as RespRow);
+            respByPrevItem.set(row.item_id, arr);
+          });
+
+          // 7.5) Tính % đồng thuận cho từng item hiện tại dựa trên item vòng trước có cùng item_order
+          const agg: PrevAgg = {};
+          for (const [order, curItem] of curByOrder.entries()) {
+            const pItem = prevByOrder.get(order);
+            if (!pItem) continue;
+            const rows = respByPrevItem.get(pItem.id) ?? [];
+            const { N, pctAgree } = computePrevAgree(pItem, rows);
+            agg[curItem.id] = { N, pctAgree };
+          }
+
+          setPrevAgg(agg);
+        }
+      }
+
       setLoading(false);
     };
 
     load();
   }, [roundId]);
 
- // ===== Helpers thay đổi câu trả lời =====
-const handleChange = (itemId: string, value: any) => {
-  setAnswers(prev => ({ ...prev, [itemId]: value }));
-};
+  // ===== Helpers thay đổi câu trả lời =====
+  const handleChange = (itemId: string, value: any) => {
+    setAnswers(prev => ({ ...prev, [itemId]: value }));
+  };
 
-const handleCommentChange = (itemId: string, value: string) => {
-  setComments(prev => ({ ...prev, [itemId]: value }));
-};
+  const handleCommentChange = (itemId: string, value: string) => {
+    setComments(prev => ({ ...prev, [itemId]: value }));
+  };
 
-const toggleMulti = (itemId: string, choice: string) => {
-  setAnswers(prev => {
-    const cur = Array.isArray(prev[itemId]) ? prev[itemId] : [];
-    const exists = cur.includes(choice);
-    const next = exists ? cur.filter((c: string) => c !== choice) : [...cur, choice];
-    return { ...prev, [itemId]: next };
-  });
-};
-
-// ===== Kiểm tra trống/đầy cho 1 câu trả lời =====
-const isEmptyAnswer = (v: any) => {
-  if (v === undefined || v === null) return true;
-  if (Array.isArray(v)) return v.length === 0;
-  if (typeof v === 'string') return v.trim() === ''; // chuỗi rỗng là chưa trả lời
-  return false; // số (kể cả 0) hoặc object hợp lệ
-};
-
-// ===== Validate: đã trả lời HẾT tất cả items của vòng hiện tại =====
-const isAllAnswered = useMemo(() => {
-  return items.every(it => !isEmptyAnswer(answers[it.id]));
-}, [items, answers]);
-
-// ===== Lưu / Gửi =====
-const handleSave = async () => save(false);
-
-const handleSubmit = async () => {
-  // vòng phải đang active
-  if (round?.status !== 'active') {
-    setMessage('Vòng này chưa mở hoặc đã đóng. Không thể gửi bản cuối.');
-    return;
-  }
-
-  // phải trả lời đủ 100%
-  const unanswered = items.filter(it => isEmptyAnswer(answers[it.id]));
-  if (unanswered.length > 0) {
-    setMessage(`Bạn còn ${unanswered.length} câu chưa trả lời. Vui lòng hoàn tất trước khi gửi.`);
-    return;
-  }
-
-  await save(true);
-};
-
-// Gộp payload CHỈ từ các item đã có câu trả lời; khi submit bắt buộc đủ
-const save = async (submit: boolean) => {
-  if (!round) return;
-  setMessage('Đang lưu...');
-
-  const { data: session } = await supabase.auth.getSession();
-  const userId = session.session?.user.id!;
-  if (!userId) {
-    setMessage('Không xác định được người dùng.');
-    return;
-  }
-
-  // chỉ build payload cho các item đã có câu trả lời
-  const payload = items
-    .filter(it => !isEmptyAnswer(answers[it.id]))
-    .map(it => {
-      const raw = answers[it.id];
-      const ans: any = {};
-      if (Array.isArray(raw)) ans.choices = raw;
-      else if (typeof raw === 'number' || typeof raw === 'string') ans.value = raw;
-
-      const cmt = comments[it.id];
-      if (typeof cmt === 'string' && cmt.trim() !== '') ans.comment = cmt.trim();
-
-      return {
-        round_id: round.id,
-        item_id: it.id,
-        user_id: userId,
-        answer_json: ans,
-        is_submitted: submit,
-      };
+  const toggleMulti = (itemId: string, choice: string) => {
+    setAnswers(prev => {
+      const cur = Array.isArray(prev[itemId]) ? prev[itemId] : [];
+      const exists = cur.includes(choice);
+      const next = exists ? cur.filter((c: string) => c !== choice) : [...cur, choice];
+      return { ...prev, [itemId]: next };
     });
+  };
 
-  // Phòng hờ: nếu bấm gửi mà payload vẫn thiếu so với tổng số câu => chặn
-  if (submit && payload.length < items.length) {
-    setMessage('Có câu chưa trả lời, không thể gửi bản cuối.');
-    return;
-  }
+  // ===== Kiểm tra trống/đầy cho 1 câu trả lời =====
+  const isEmptyAnswer = (v: any) => {
+    if (v === undefined || v === null) return true;
+    if (Array.isArray(v)) return v.length === 0;
+    if (typeof v === 'string') return v.trim() === ''; // chuỗi rỗng là chưa trả lời
+    return false; // số (kể cả 0) hoặc object hợp lệ
+  };
 
-  const { error } = await supabase
-    .from('responses')
-    .upsert(payload, { onConflict: 'round_id,item_id,user_id' });
+  // ===== Validate: đã trả lời HẾT tất cả items của vòng hiện tại =====
+  const isAllAnswered = useMemo(() => {
+    return items.every(it => !isEmptyAnswer(answers[it.id]));
+  }, [items, answers]);
 
-  setMessage(
-    error ? ('Lỗi lưu: ' + error.message) : (submit ? 'Đã gửi thành công.' : 'Đã lưu nháp.')
-  );
+  // ===== Lưu / Gửi =====
+  const handleSave = async () => save(false);
 
-  if (!error && submit) {
-    setSubmitted(true);
-    setTimeout(() => router.push('/dashboard'), 1500);
-  }
-};
+  const handleSubmit = async () => {
+    // vòng phải đang active
+    if (round?.status !== 'active') {
+      setMessage('Vòng này chưa mở hoặc đã đóng. Không thể gửi bản cuối.');
+      return;
+    }
+
+    // phải trả lời đủ 100%
+    const unanswered = items.filter(it => isEmptyAnswer(answers[it.id]));
+    if (unanswered.length > 0) {
+      setMessage(`Bạn còn ${unanswered.length} câu chưa trả lời. Vui lòng hoàn tất trước khi gửi.`);
+      return;
+    }
+
+    await save(true);
+  };
+
+  // Gộp payload CHỈ từ các item đã có câu trả lời; khi submit bắt buộc đủ
+  const save = async (submit: boolean) => {
+    if (!round) return;
+    setMessage('Đang lưu...');
+
+    const { data: session } = await supabase.auth.getSession();
+    const userId = session.session?.user.id!;
+    if (!userId) {
+      setMessage('Không xác định được người dùng.');
+      return;
+    }
+
+    // chỉ build payload cho các item đã có câu trả lời
+    const payload = items
+      .filter(it => !isEmptyAnswer(answers[it.id]))
+      .map(it => {
+        const raw = answers[it.id];
+        const ans: any = {};
+        if (Array.isArray(raw)) ans.choices = raw;
+        else if (typeof raw === 'number' || typeof raw === 'string') ans.value = raw;
+
+        const cmt = comments[it.id];
+        if (typeof cmt === 'string' && cmt.trim() !== '') ans.comment = cmt.trim();
+
+        return {
+          round_id: round.id,
+          item_id: it.id,
+          user_id: userId,
+          answer_json: ans,
+          is_submitted: submit,
+        };
+      });
+
+    // Phòng hờ: nếu bấm gửi mà payload vẫn thiếu so với tổng số câu => chặn
+    if (submit && payload.length < items.length) {
+      setMessage('Có câu chưa trả lời, không thể gửi bản cuối.');
+      return;
+    }
+
+    const { error } = await supabase
+      .from('responses')
+      .upsert(payload, { onConflict: 'round_id,item_id,user_id' });
+
+    setMessage(
+      error ? ('Lỗi lưu: ' + error.message) : (submit ? 'Đã gửi thành công.' : 'Đã lưu nháp.')
+    );
+
+    if (!error && submit) {
+      setSubmitted(true);
+      setTimeout(() => router.push('/dashboard'), 1500);
+    }
+  };
 
   // Điều hướng
   const goTo = (idx: number) => setCurIndex(idx);
@@ -270,6 +367,17 @@ const save = async (submit: boolean) => {
           <span className="text-sm text-gray-400 font-semibold">Câu {idx + 1}/{items.length}</span>
           <span className="font-bold text-lg text-indigo-800 flex-1">{it.prompt}</span>
         </div>
+
+        {/* Kết quả tổng hợp vòng trước (nếu có) */}
+        {round?.round_number > 1 && prevAgg[it.id] && (
+          <div className="bg-amber-50 border-l-4 border-amber-400 p-3 mb-2 text-sm text-amber-800 rounded">
+            <div className="font-semibold">
+              Kết quả vòng trước:
+              <span className="ml-1">Đồng thuận {prevAgg[it.id].pctAgree}%</span>
+              <span className="ml-2 text-amber-700">({prevAgg[it.id].N} phản hồi)</span>
+            </div>
+          </div>
+        )}
 
         {/* Ý kiến chuyên gia vòng trước */}
         {prevComments[it.id]?.length > 0 && (
