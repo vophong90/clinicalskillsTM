@@ -38,7 +38,16 @@ type RespRow = {
 };
 
 // Thống kê vòng trước cho mỗi item hiện tại
-type PrevAgg = Record<string, { N: number; pctAgree: number }>;
+// - scale: dùng pctAgree (>= ngưỡng)
+// - single/multi: dùng optionPct cho từng đáp án
+type PrevAgg = Record<
+  string,
+  {
+    N: number;
+    pctAgree?: number; // cho scale
+    optionPct?: Record<string, number>; // cho single/multi
+  }
+>;
 
 export default function SurveyPage() {
   const params = useParams();
@@ -50,48 +59,69 @@ export default function SurveyPage() {
   const [answers, setAnswers] = useState<Record<string, any>>({});
   const [comments, setComments] = useState<Record<string, string>>({});
   const [prevComments, setPrevComments] = useState<Record<string, string[]>>({});
-  const [prevAgg, setPrevAgg] = useState<PrevAgg>({}); // <-- thêm state thống kê vòng trước
+  const [prevAgg, setPrevAgg] = useState<PrevAgg>({});
   const [curIndex, setCurIndex] = useState(0);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState<string>('');
   const [submitted, setSubmitted] = useState(false);
 
-  // Helper: tính % đồng thuận từ responses vòng trước cho 1 item
-  const computePrevAgree = (item: Item, rows: RespRow[]) => {
+  // ===== Helper: phân trang lấy hết dữ liệu (tránh giới hạn 1000) =====
+  async function fetchAllRange<T>(
+    makeQuery: (from: number, to: number) => Promise<{ data: T[] | null; error: any }>,
+    pageSize = 1000
+  ): Promise<T[]> {
+    let all: T[] = [];
+    let from = 0;
+    while (true) {
+      const to = from + pageSize - 1;
+      const { data, error } = await makeQuery(from, to);
+      if (error) throw error;
+      const chunk = data ?? [];
+      all = all.concat(chunk);
+      if (chunk.length < pageSize) break;
+      from += pageSize;
+    }
+    return all;
+  }
+
+  // Helper: tính % đồng thuận (scale)
+  const computePrevAgreeScale = (item: Item, rows: RespRow[]) => {
     const submittedRows = rows.filter(r => r.is_submitted);
     const N = submittedRows.length;
     if (N === 0) return { N: 0, pctAgree: 0 };
 
-    if (item.type === 'scale') {
-      const vals: number[] = [];
-      submittedRows.forEach(r => {
-        const v = Number(r.answer_json?.value);
-        if (!Number.isNaN(v)) vals.push(v);
-      });
-      const scaleMax = item.options_json?.scale_max ?? 5;
-      const cut = scaleMax >= 5 ? 4 : 3; // ngưỡng đồng thuận mặc định
-      const agree = vals.filter(v => v >= cut).length;
-      return { N, pctAgree: Math.round((agree / N) * 100) };
-    }
+    const vals: number[] = [];
+    submittedRows.forEach(r => {
+      const v = Number(r.answer_json?.value);
+      if (!Number.isNaN(v)) vals.push(v);
+    });
+    const scaleMax = item.options_json?.scale_max ?? 5;
+    const cut = scaleMax >= 5 ? 4 : 3; // ngưỡng đồng thuận mặc định
+    const agree = vals.filter(v => v >= cut).length;
+    return { N, pctAgree: Math.round((agree / N) * 100) };
+  };
 
-    if (item.type === 'single' || item.type === 'multi') {
-      const choices = item.options_json?.choices ?? [];
-      const agreeOpts = choices.filter(opt =>
-        opt.includes('phù hợp') ||
-        opt.toLowerCase().includes('relevant') ||
-        opt.toLowerCase().includes('đồng ý')
-      );
-      let agreeCount = 0;
-      submittedRows.forEach(r => {
-        const a = r.answer_json;
-        const arr = Array.isArray(a?.choices) ? a.choices : (a?.value ? [a.value] : []);
-        if (arr.some((c: string) => agreeOpts.includes(c))) agreeCount++;
-      });
-      return { N, pctAgree: Math.round((agreeCount / N) * 100) };
-    }
+  // Helper: tính % cho từng lựa chọn (single/multi)
+  const computePrevOptionPct = (item: Item, rows: RespRow[]) => {
+    const submittedRows = rows.filter(r => r.is_submitted);
+    const N = submittedRows.length;
+    const choices = item.options_json?.choices ?? [];
+    const counts: Record<string, number> = {};
+    choices.forEach(c => (counts[c] = 0));
 
-    // text: không có đồng thuận định lượng
-    return { N, pctAgree: 0 };
+    submittedRows.forEach(r => {
+      const a = r.answer_json;
+      const arr = Array.isArray(a?.choices) ? a.choices : (a?.value ? [a.value] : []);
+      arr.forEach((c: string) => {
+        if (counts[c] !== undefined) counts[c] += 1;
+      });
+    });
+
+    const optionPct: Record<string, number> = {};
+    choices.forEach(c => {
+      optionPct[c] = N > 0 ? Math.round((counts[c] / N) * 100) : 0;
+    });
+    return { N, optionPct };
   };
 
   // Load dữ liệu
@@ -186,7 +216,7 @@ export default function SurveyPage() {
         }
       }
 
-      // 7) Thống kê vòng trước (tỷ lệ đồng thuận & N) — chỉ khi > 1
+      // 7) Thống kê vòng trước (tỷ lệ vòng trước) — chỉ khi > 1
       if (r.round_number > 1) {
         // 7.1) Vòng trước cùng project
         const { data: prevRound } = await supabase
@@ -197,29 +227,36 @@ export default function SurveyPage() {
           .maybeSingle();
 
         if (prevRound?.id) {
-          // 7.2) Items vòng trước + responses vòng trước (đã nộp)
-          const [{ data: prevItems }, { data: prevResps }] = await Promise.all([
-            supabase
-              .from('items')
-              .select('id,prompt,options_json,type,item_order,project_id,round_id')
-              .eq('round_id', prevRound.id)
-              .order('item_order', { ascending: true }),
-            supabase
-              .from('responses')
-              .select('item_id, answer_json, is_submitted')
-              .eq('round_id', prevRound.id)
-              .eq('is_submitted', true)
-              .range(0, 999999),
-          ]);
+          // 7.2) Items vòng trước
+          const { data: prevItems } = await supabase
+            .from('items')
+            .select('id,prompt,options_json,type,item_order,project_id,round_id')
+            .eq('round_id', prevRound.id)
+            .order('item_order', { ascending: true });
 
-          // 7.3) Map theo item_order giữa vòng trước ↔ vòng hiện tại
+          // 7.3) Responses vòng trước (đã nộp) — PHÂN TRANG để vượt 1000
+          const prevResps = await fetchAllRange<RespRow>(
+            async (from, to) => {
+              const { data, error } = await supabase
+                .from('responses')
+                .select('item_id, answer_json, is_submitted')
+                .eq('round_id', prevRound.id)
+                .eq('is_submitted', true)
+                .order('item_id', { ascending: true }) // khóa ổn định cho phân trang
+                .range(from, to);
+              return { data: (data ?? []) as RespRow[], error };
+            },
+            1000
+          );
+
+          // 7.4) Map theo item_order giữa vòng trước ↔ vòng hiện tại
           const curByOrder = new Map<number, Item>();
           safeItems.forEach(i => curByOrder.set(i.item_order, i));
 
           const prevByOrder = new Map<number, Item>();
           (prevItems ?? []).forEach(i => prevByOrder.set(i.item_order, i));
 
-          // 7.4) Gom responses theo item vòng trước
+          // 7.5) Gom responses theo item vòng trước
           const respByPrevItem = new Map<string, RespRow[]>();
           (prevResps ?? []).forEach(row => {
             const arr = respByPrevItem.get(row.item_id) ?? [];
@@ -227,14 +264,22 @@ export default function SurveyPage() {
             respByPrevItem.set(row.item_id, arr);
           });
 
-          // 7.5) Tính % đồng thuận cho từng item hiện tại dựa trên item vòng trước có cùng item_order
+          // 7.6) Tính thống kê cho từng item hiện tại dựa trên item vòng trước tương ứng
           const agg: PrevAgg = {};
           for (const [order, curItem] of Array.from(curByOrder.entries())) {
             const pItem = prevByOrder.get(order);
             if (!pItem) continue;
             const rows = respByPrevItem.get(pItem.id) ?? [];
-            const { N, pctAgree } = computePrevAgree(pItem, rows);
-            agg[curItem.id] = { N, pctAgree };
+            if (pItem.type === 'scale') {
+              const { N, pctAgree } = computePrevAgreeScale(pItem, rows);
+              agg[curItem.id] = { N, pctAgree };
+            } else if (pItem.type === 'single' || pItem.type === 'multi') {
+              const { N, optionPct } = computePrevOptionPct(pItem, rows);
+              agg[curItem.id] = { N, optionPct };
+            } else {
+              // text: không có thống kê định lượng
+              agg[curItem.id] = { N: rows.length };
+            }
           }
           setPrevAgg(agg);
         }
@@ -281,23 +326,18 @@ export default function SurveyPage() {
   const handleSave = async () => save(false);
 
   const handleSubmit = async () => {
-    // vòng phải đang active
     if (round?.status !== 'active') {
       setMessage('Vòng này chưa mở hoặc đã đóng. Không thể gửi bản cuối.');
       return;
     }
-
-    // phải trả lời đủ 100%
     const unanswered = items.filter(it => isEmptyAnswer(answers[it.id]));
     if (unanswered.length > 0) {
       setMessage(`Bạn còn ${unanswered.length} câu chưa trả lời. Vui lòng hoàn tất trước khi gửi.`);
       return;
     }
-
     await save(true);
   };
 
-  // Gộp payload CHỈ từ các item đã có câu trả lời; khi submit bắt buộc đủ
   const save = async (submit: boolean) => {
     if (!round) return;
     setMessage('Đang lưu...');
@@ -309,7 +349,6 @@ export default function SurveyPage() {
       return;
     }
 
-    // chỉ build payload cho các item đã có câu trả lời
     const payload = items
       .filter(it => !isEmptyAnswer(answers[it.id]))
       .map(it => {
@@ -330,7 +369,6 @@ export default function SurveyPage() {
         };
       });
 
-    // Phòng hờ: nếu bấm gửi mà payload vẫn thiếu so với tổng số câu => chặn
     if (submit && payload.length < items.length) {
       setMessage('Có câu chưa trả lời, không thể gửi bản cuối.');
       return;
@@ -359,6 +397,7 @@ export default function SurveyPage() {
   const renderQuestion = (it: Item, idx: number) => {
     const choices = it.options_json?.choices ?? [];
     const isActive = round?.status === 'active' && !submitted;
+    const showPrevBox = ((round?.round_number ?? 0) > 1) && !!prevAgg[it.id];
 
     return (
       <div key={it.id} className="bg-white shadow-2xl rounded-2xl p-8 mb-8 w-full max-w-3xl mx-auto min-w-[420px]">
@@ -368,13 +407,30 @@ export default function SurveyPage() {
         </div>
 
         {/* Kết quả tổng hợp vòng trước (nếu có) */}
-        {((round?.round_number ?? 0) > 1 && !!prevAgg[it.id]) && (
+        {showPrevBox && (
           <div className="bg-amber-50 border-l-4 border-amber-400 p-3 mb-2 text-sm text-amber-800 rounded">
-            <div className="font-semibold">
-              Kết quả vòng trước:
-              <span className="ml-1">Đồng thuận {prevAgg[it.id].pctAgree}%</span>
-              <span className="ml-2 text-amber-700">({prevAgg[it.id].N} phản hồi)</span>
-            </div>
+            {it.type === 'scale' && typeof prevAgg[it.id].pctAgree === 'number' ? (
+              <div className="font-semibold">
+                Kết quả vòng trước:
+                <span className="ml-1">Đồng thuận {prevAgg[it.id].pctAgree}%</span>
+                <span className="ml-2 text-amber-700">({prevAgg[it.id].N} phản hồi)</span>
+              </div>
+            ) : (it.type === 'single' || it.type === 'multi') && prevAgg[it.id].optionPct ? (
+              <div>
+                <div className="font-semibold mb-1">
+                  Kết quả vòng trước ({prevAgg[it.id].N} phản hồi):
+                </div>
+                <ul className="list-disc ml-5">
+                  {Object.entries(prevAgg[it.id].optionPct).map(([opt, pct]) => (
+                    <li key={opt}><b>{opt}</b>: {pct}%</li>
+                  ))}
+                </ul>
+              </div>
+            ) : (
+              <div className="font-semibold">
+                Kết quả vòng trước: (không có số liệu định lượng)
+              </div>
+            )}
           </div>
         )}
 
