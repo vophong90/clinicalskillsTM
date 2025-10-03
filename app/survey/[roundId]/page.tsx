@@ -21,6 +21,7 @@ type Item = {
   project_id: string;
   round_id?: string;
   type: ItemType;
+  stable_code?: string | null;
 };
 
 type Round = {
@@ -32,9 +33,12 @@ type Round = {
 };
 
 type RespRow = {
+  id?: string;
   item_id: string;
   answer_json: any;
   is_submitted: boolean;
+  updated_at?: string;
+  user_id?: string;
 };
 
 // Thống kê vòng trước cho mỗi item hiện tại
@@ -162,7 +166,7 @@ export default function SurveyPage() {
       // 2) Items (của vòng này)
       const { data: its, error: itErr } = await supabase
         .from('items')
-        .select('id,prompt,options_json,type,item_order,project_id,round_id')
+        .select('id,prompt,options_json,type,item_order,project_id,round_id,stable_code')
         .eq('project_id', r.project_id)
         .eq('round_id', r.id)
         .order('item_order', { ascending: true });
@@ -216,93 +220,97 @@ export default function SurveyPage() {
       const allSubmittedNow = (safeItems.length > 0) && safeItems.every(it => submittedIds.has(it.id));
       setSubmitted(allSubmittedNow);
 
-      // 6) Nhận xét vòng trước qua RPC (nếu có)
-      if (r.round_number > 1) {
-        try {
-          const rows = await fetchAllPrevComments(r.id, 1000);
-          if (rows && rows.length) {
-            const prevMap: Record<string, string[]> = {};
-            rows.forEach((row: any) => {
-              (prevMap[row.current_item_id] ??= []).push(row.comment);
-            });
-            setPrevComments(prevMap);
-          } else {
-            setPrevComments({});
-          }
-        } catch (e: any) {
-          console.error('get_prev_comments paginated error:', e);
-        }
+      // 7) Thống kê vòng trước (tỷ lệ + góp ý) — chỉ khi > 1
+if (r.round_number > 1) {
+  // 7.1) Vòng trước cùng project
+  const { data: prevRound } = await supabase
+    .from('rounds')
+    .select('id, round_number')
+    .eq('project_id', r.project_id)
+    .eq('round_number', r.round_number - 1)
+    .maybeSingle();
+
+  if (prevRound?.id) {
+    // 7.2) Items vòng trước (thêm stable_code)
+    const { data: prevItems } = await supabase
+      .from('items')
+      .select('id,prompt,options_json,type,item_order,project_id,round_id,stable_code')
+      .eq('round_id', prevRound.id)
+      .order('item_order', { ascending: true });
+
+    // 7.3) Responses vòng trước (đã nộp) — PHÂN TRANG
+    const prevResps = await fetchAllRange<RespRow>(
+      async (from, to) => {
+        const { data, error } = await supabase
+          .from('responses')
+          .select('id,item_id,answer_json,is_submitted,updated_at,user_id') // ✅ thêm cột để ổn định order
+          .eq('round_id', prevRound.id)
+          .eq('is_submitted', true)
+          .order('item_id', { ascending: true })
+          .order('updated_at', { ascending: true, nullsFirst: true })
+          .order('user_id', { ascending: true })
+          .order('id', { ascending: true })
+          .range(from, to);
+        return { data: (data ?? []) as RespRow[], error };
+      },
+      1000
+    );
+
+    // 7.4) Map theo stable_code (KHÔNG dùng item_order)
+    const curByCode = new Map<string, Item>();
+    (safeItems ?? []).forEach(i => {
+      if (i.stable_code) curByCode.set(i.stable_code, i);
+    });
+
+    const prevByCode = new Map<string, Item>();
+    (prevItems ?? []).forEach(i => {
+      if (i.stable_code) prevByCode.set(i.stable_code, i);
+    });
+
+    // 7.5) Gom responses theo item vòng trước
+    const respByPrevItem = new Map<string, RespRow[]>();
+    (prevResps ?? []).forEach(row => {
+      const arr = respByPrevItem.get(row.item_id) ?? [];
+      arr.push(row);
+      respByPrevItem.set(row.item_id, arr);
+    });
+
+    // 7.6) Tính tỷ lệ + gom góp ý theo STABLE_CODE
+    const agg: PrevAgg = {};
+    const commentsMap: Record<string, string[]> = {};
+
+    for (const [code, curItem] of curByCode.entries()) {
+      const pItem = prevByCode.get(code);
+      if (!pItem) continue; // câu mới → không có dữ liệu vòng trước
+
+      const rows = respByPrevItem.get(pItem.id) ?? [];
+
+      // Tỷ lệ
+      if (pItem.type === 'scale') {
+        const { N, pctAgree } = computePrevAgreeScale(pItem, rows);
+        agg[curItem.id] = { N, pctAgree };
+      } else if (pItem.type === 'single' || pItem.type === 'multi') {
+        const { N, optionPct } = computePrevOptionPct(pItem, rows);
+        agg[curItem.id] = { N, optionPct };
+      } else {
+        agg[curItem.id] = { N: rows.length };
       }
 
-      // 7) Thống kê vòng trước (tỷ lệ vòng trước) — chỉ khi > 1
-      if (r.round_number > 1) {
-        // 7.1) Vòng trước cùng project
-        const { data: prevRound } = await supabase
-          .from('rounds')
-          .select('id, round_number')
-          .eq('project_id', r.project_id)
-          .eq('round_number', r.round_number - 1)
-          .maybeSingle();
-
-        if (prevRound?.id) {
-          // 7.2) Items vòng trước
-          const { data: prevItems } = await supabase
-            .from('items')
-            .select('id,prompt,options_json,type,item_order,project_id,round_id')
-            .eq('round_id', prevRound.id)
-            .order('item_order', { ascending: true });
-
-          // 7.3) Responses vòng trước (đã nộp) — PHÂN TRANG để vượt 1000
-          const prevResps = await fetchAllRange<RespRow>(
-            async (from, to) => {
-              const { data, error } = await supabase
-                .from('responses')
-                .select('item_id, answer_json, is_submitted')
-                .eq('round_id', prevRound.id)
-                .eq('is_submitted', true)
-                .order('item_id', { ascending: true }) // khóa ổn định cho phân trang
-                .range(from, to);
-              return { data: (data ?? []) as RespRow[], error };
-            },
-            1000
-          );
-
-          // 7.4) Map theo item_order giữa vòng trước ↔ vòng hiện tại
-          const curByOrder = new Map<number, Item>();
-          safeItems.forEach(i => curByOrder.set(i.item_order, i));
-
-          const prevByOrder = new Map<number, Item>();
-          (prevItems ?? []).forEach(i => prevByOrder.set(i.item_order, i));
-
-          // 7.5) Gom responses theo item vòng trước
-          const respByPrevItem = new Map<string, RespRow[]>();
-          (prevResps ?? []).forEach(row => {
-            const arr = respByPrevItem.get(row.item_id) ?? [];
-            arr.push(row as RespRow);
-            respByPrevItem.set(row.item_id, arr);
-          });
-
-          // 7.6) Tính thống kê cho từng item hiện tại dựa trên item vòng trước tương ứng
-          const agg: PrevAgg = {};
-          for (const [order, curItem] of Array.from(curByOrder.entries())) {
-            const pItem = prevByOrder.get(order);
-            if (!pItem) continue;
-            const rows = respByPrevItem.get(pItem.id) ?? [];
-            if (pItem.type === 'scale') {
-              const { N, pctAgree } = computePrevAgreeScale(pItem, rows);
-              agg[curItem.id] = { N, pctAgree };
-            } else if (pItem.type === 'single' || pItem.type === 'multi') {
-              const { N, optionPct } = computePrevOptionPct(pItem, rows);
-              agg[curItem.id] = { N, optionPct };
-            } else {
-              // text: không có thống kê định lượng
-              agg[curItem.id] = { N: rows.length };
-            }
-          }
-          setPrevAgg(agg);
+      // Góp ý
+      const list: string[] = [];
+      for (const rrow of rows) {
+        const cmt = (rrow as any).answer_json?.comment;
+        if (typeof cmt === 'string' && cmt.trim() !== '') {
+          list.push(cmt.trim());
         }
       }
+      if (list.length > 0) commentsMap[curItem.id] = list;
+    }
 
+    setPrevAgg(agg);
+    setPrevComments(commentsMap); // ✅ góp ý lấy từ cùng dataset với prevAgg
+  }
+}
       setLoading(false);
     };
 
