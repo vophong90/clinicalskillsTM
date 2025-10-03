@@ -276,36 +276,34 @@ if (r.round_number > 1) {
     });
 
     // 7.6) Tính tỷ lệ + gom góp ý theo STABLE_CODE
-    const agg: PrevAgg = {};
-    const commentsMap: Record<string, string[]> = {};
+const agg: PrevAgg = {};
+const commentsMap: Record<string, string[]> = {};
 
-    for (const [code, curItem] of curByCode.entries()) {
-      const pItem = prevByCode.get(code);
-      if (!pItem) continue; // câu mới → không có dữ liệu vòng trước
+curByCode.forEach((curItem, code) => {
+  const pItem = prevByCode.get(code);
+  if (!pItem) return; // câu mới → không có dữ liệu vòng trước
 
-      const rows = respByPrevItem.get(pItem.id) ?? [];
+  const rows = respByPrevItem.get(pItem.id) ?? [];
 
-      // Tỷ lệ
-      if (pItem.type === 'scale') {
-        const { N, pctAgree } = computePrevAgreeScale(pItem, rows);
-        agg[curItem.id] = { N, pctAgree };
-      } else if (pItem.type === 'single' || pItem.type === 'multi') {
-        const { N, optionPct } = computePrevOptionPct(pItem, rows);
-        agg[curItem.id] = { N, optionPct };
-      } else {
-        agg[curItem.id] = { N: rows.length };
-      }
+  // Tỷ lệ ...
+  if (pItem.type === 'scale') {
+    const { N, pctAgree } = computePrevAgreeScale(pItem, rows);
+    agg[curItem.id] = { N, pctAgree };
+  } else if (pItem.type === 'single' || pItem.type === 'multi') {
+    const { N, optionPct } = computePrevOptionPct(pItem, rows);
+    agg[curItem.id] = { N, optionPct };
+  } else {
+    agg[curItem.id] = { N: rows.length };
+  }
 
-      // Góp ý
-      const list: string[] = [];
-      for (const rrow of rows) {
-        const cmt = (rrow as any).answer_json?.comment;
-        if (typeof cmt === 'string' && cmt.trim() !== '') {
-          list.push(cmt.trim());
-        }
-      }
-      if (list.length > 0) commentsMap[curItem.id] = list;
-    }
+  // Góp ý ...
+  const list: string[] = [];
+  rows.forEach((rrow) => {
+    const cmt = (rrow as any).answer_json?.comment;
+    if (typeof cmt === 'string' && cmt.trim() !== '') list.push(cmt.trim());
+  });
+  if (list.length > 0) commentsMap[curItem.id] = list;
+});
 
     setPrevAgg(agg);
     setPrevComments(commentsMap); // ✅ góp ý lấy từ cùng dataset với prevAgg
