@@ -84,6 +84,21 @@ export default function SurveyPage() {
     return all;
   }
 
+  async function fetchAllPrevComments(curRoundId: string, pageSize = 1000) {
+    let all: any[] = [];
+    let offset = 0;
+    for (;;) {
+      const { data, error } = await supabase
+        .rpc('get_prev_comments', { cur_round_id: curRoundId, p_limit: pageSize, p_offset: offset });
+      if (error) throw error;
+      const chunk = data ?? [];
+      all = all.concat(chunk);
+      if (chunk.length < pageSize) break; // hết dữ liệu
+      offset += pageSize;
+    }
+    return all;
+  }
+
   // Helper: tính % đồng thuận (scale)
   const computePrevAgreeScale = (item: Item, rows: RespRow[]) => {
     const submittedRows = rows.filter(r => r.is_submitted);
@@ -203,16 +218,19 @@ export default function SurveyPage() {
 
       // 6) Nhận xét vòng trước qua RPC (nếu có)
       if (r.round_number > 1) {
-        const { data: rows, error: prevErr } = await supabase
-          .rpc('get_prev_comments', { cur_round_id: r.id });
-
-        if (!prevErr && rows?.length) {
-          const prevMap: Record<string, string[]> = {};
-          rows.forEach((row: any) => {
-            if (!prevMap[row.current_item_id]) prevMap[row.current_item_id] = [];
-            prevMap[row.current_item_id].push(row.comment);
-          });
-          setPrevComments(prevMap);
+        try {
+          const rows = await fetchAllPrevComments(r.id, 1000);
+          if (rows && rows.length) {
+            const prevMap: Record<string, string[]> = {};
+            rows.forEach((row: any) => {
+              (prevMap[row.current_item_id] ??= []).push(row.comment);
+            });
+            setPrevComments(prevMap);
+          } else {
+            setPrevComments({});
+          }
+        } catch (e: any) {
+          console.error('get_prev_comments paginated error:', e);
         }
       }
 
