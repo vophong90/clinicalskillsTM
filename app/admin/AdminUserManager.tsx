@@ -57,6 +57,7 @@ async function fetchAllResponses(roundId: string): Promise<SurveyResponse[]> {
 
 export default function AdminUserManager() {
   // ====== DATA STATE ======
+  const router = useRouter();
   const [users, setUsers] = useState<UserProfile[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [rounds, setRounds] = useState<Round[]>([]);
@@ -68,6 +69,22 @@ export default function AdminUserManager() {
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState<string>('');
+
+  async function waitForSession(): Promise<import('@supabase/supabase-js').Session> {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session) return session;
+
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('No session')), 8000);
+      const { data: sub } = supabase.auth.onAuthStateChange((_evt, s) => {
+        if (s) {
+          clearTimeout(timer);
+          sub.subscription.unsubscribe();
+          resolve(s);
+        }
+      });
+    });
+  }
 
   // Filters cho BẢNG TỔNG HỢP
   const [filterProject, setFilterProject] = useState('');
@@ -100,6 +117,8 @@ export default function AdminUserManager() {
 
   // ====== LOAD DATA ======
   async function loadAll() {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) throw new Error('Not authenticated');
     setLoading(true);
     const [
       { data: profiles },
@@ -125,7 +144,22 @@ export default function AdminUserManager() {
     setLoading(false);
   }
   
-  useEffect(() => { loadAll(); }, []);
+  useEffect(() => {
+  let cancelled = false;
+  (async () => {
+    try {
+      const session = await waitForSession(); // đợi có session
+      if (!session?.user) {
+        router.push('/login');
+        return;
+      }
+      if (!cancelled) await loadAll();
+    } catch {
+      router.push('/login');
+    }
+  })();
+  return () => { cancelled = true; };
+}, []);
 
   // ====== HELPERS ======
   const selectedUser = users.find(u => u.id === selectedUserId) || null;
