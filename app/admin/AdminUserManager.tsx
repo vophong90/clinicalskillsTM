@@ -1,6 +1,8 @@
 'use client';
 import React, { useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
+import { useRouter } from 'next/navigation';
+import type { Session } from '@supabase/supabase-js';
 
 type UserProfile = { id: string; email: string; name: string; role: string };
 type Project = { id: string; title: string };
