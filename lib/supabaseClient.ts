@@ -1,20 +1,13 @@
-// File: lib/supabase-admin.ts
-import 'server-only';                    // ✅ chặn import từ client
+// File: lib/supabaseClient.ts  (dùng cho Client Components)
 import { createClient } from '@supabase/supabase-js';
 
-const url = process.env.SUPABASE_URL;   // ✅ server-only (trùng giá trị NEXT_PUBLIC_SUPABASE_URL)
-const key = process.env.SUPABASE_SERVICE_ROLE_KEY; // ✅ tuyệt đối KHÔNG public
-
-if (!url || !key) {
-  throw new Error('Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY in environment variables.');
-}
-
-export function getAdminClient() {
-  return createClient(url, key, {
+export const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+  {
     auth: {
-      persistSession: false,
-      autoRefreshToken: false,          // ✅ server không cần auto refresh
+      persistSession: true,
+      autoRefreshToken: true,
     },
-    // db: { schema: 'public' },        // (tuỳ chọn) nếu bạn muốn cố định schema
-  });
-}
+  }
+);
