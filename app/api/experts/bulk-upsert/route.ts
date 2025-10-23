@@ -1,55 +1,117 @@
 // File: app/api/experts/bulk-upsert/route.ts
-import { NextRequest, NextResponse } from 'next/server';
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+
+import { NextResponse } from 'next/server';
 import { getAdminClient } from '@/lib/supabase-admin';
 
-export async function POST(req: NextRequest) {
+// Tìm userId trong Auth bằng listUsers (fallback khi email đã tồn tại)
+async function findAuthUserIdByEmail(s: ReturnType<typeof getAdminClient>, email: string) {
+  const PER_PAGE = 200;
+  for (let page = 1; page <= 10; page++) {
+    const { data, error } = await s.auth.admin.listUsers({ page, perPage: PER_PAGE });
+    if (error) throw error;
+    const found = data?.users?.find((u: any) => (u.email || '').toLowerCase() === email.toLowerCase());
+    if (found) return found.id as string;
+    if (!data?.users?.length || data.users.length < PER_PAGE) break;
+  }
+  return null;
+}
+
+// Đảm bảo có auth.users + profiles (role external_expert) và trả về userId
+async function ensureAuthAndProfile(
+  s: ReturnType<typeof getAdminClient>,
+  email: string,
+  fullName: string
+) {
+  // 1) Tìm profile theo email trước (rẻ + nhanh)
+  const prof = await s.from('profiles').select('id').eq('email', email).maybeSingle();
+  if (prof.data?.id) return prof.data.id as string;
+
+  // 2) Tạo user trong Auth (auto confirm email)
+  const { data: created, error: createErr } = await s.auth.admin.createUser({
+    email,
+    email_confirm: true,
+    user_metadata: { name: fullName },
+  });
+
+  let userId: string | null = created?.user?.id ?? null;
+
+  // 3) Nếu email đã tồn tại → fallback listUsers để lấy id
+  if (!userId && createErr) {
+    const byEmail = await findAuthUserIdByEmail(s, email);
+    if (byEmail) userId = byEmail;
+  }
+
+  if (!userId) {
+    throw new Error(`Không thể xác định userId cho ${email}: ${createErr?.message || 'unknown'}`);
+  }
+
+  // 4) Tạo/ghép profiles (id khớp auth.users.id)
+  const { error: upErr } = await s
+    .from('profiles')
+    .upsert(
+      { id: userId, email, name: fullName, role: 'external_expert' },
+      { onConflict: 'id' }
+    );
+  if (upErr) throw upErr;
+
+  return userId;
+}
+
+export async function POST(req: Request) {
   const s = getAdminClient();
-  const body = await req.json();
-  const input = (body?.experts||[]) as Array<{full_name:string; email:string; org?:string|null; title?:string|null; phone?:string|null}>;
-  if (!Array.isArray(input) || input.length===0) return NextResponse.json({ error:'experts[] required' }, { status:400 });
 
-  const cleaned = input.map(x=>({
-    full_name: (x.full_name||'').trim(),
-    email: (x.email||'').trim().toLowerCase(),
-    org: x.org||null, title: x.title||null, phone: x.phone||null
-  })).filter(x=>x.full_name && x.email);
+  const body = await req.json().catch(() => ({}));
+  const experts = Array.isArray(body?.experts) ? body.experts : [];
 
-  // Upsert external_experts theo email
-  const { data: up, error: e0 } = await s.from('external_experts').upsert(cleaned, { onConflict:'email' }).select('id,email');
-  if (e0) return NextResponse.json({ error: e0.message }, { status:500 });
+  if (!experts.length) {
+    return NextResponse.json({ error: 'experts[] is required' }, { status: 400 });
+  }
 
-  // Tạo auth.users + profiles nếu chưa có
-  const results: any[] = [];
-  for (const ex of cleaned) {
-    // Check user by email
-    let userId: string | null = null;
-    try {
-      const get = await s.auth.admin.getUserByEmail(ex.email);
-      if (get?.data?.user) {
-        userId = get.data.user.id;
-      } else {
-        const created = await s.auth.admin.createUser({ email: ex.email, email_confirm: true });
-        userId = created.data.user?.id || null;
-      }
-    } catch (err:any) {
-      results.push({ email: ex.email, created_profile: false, error: 'auth '+String(err) });
+  const details: any[] = [];
+  let upserted = 0;
+
+  for (const raw of experts) {
+    const full_name = String(raw?.full_name || raw?.name || '').trim();
+    const email = String(raw?.email || '').trim().toLowerCase();
+    const org = raw?.org ?? null;
+    const title = raw?.title ?? null;
+    const phone = raw?.phone ?? null;
+
+    if (!full_name || !email) {
+      details.push({ email, skipped: true, reason: 'missing full_name/email' });
       continue;
     }
 
-    if (!userId) { results.push({ email: ex.email, created_profile:false, error:'no user id' }); continue; }
+    try {
+      // Bảo đảm có auth user + profile
+      const userId = await ensureAuthAndProfile(s, email, full_name);
 
-    // Upsert profiles
-    const prof = { id: userId, email: ex.email, name: ex.full_name, role: 'external_expert' } as any;
-    const { error: e1 } = await s.from('profiles').upsert(prof, { onConflict: 'id' });
-    if (e1) { results.push({ email: ex.email, created_profile:false, error:e1.message }); continue; }
+      // Upsert external_experts (email unique/citext), map user_id
+      const { error: extErr } = await s
+        .from('external_experts')
+        .upsert(
+          {
+            full_name,
+            email,
+            org,
+            title,
+            phone,
+            user_id: userId,
+            is_active: true,
+          },
+          { onConflict: 'email' }
+        );
 
-    // Link về external_experts.user_id nếu cần
-    await s.from('external_experts').update({ user_id: userId }).eq('email', ex.email);
-    results.push({ email: ex.email, created_profile:true });
+      if (extErr) throw extErr;
 
-    // Pacing nhẹ tránh rate-limit
-    await new Promise(r=>setTimeout(r, 60));
+      upserted++;
+      details.push({ email, created_profile: true, user_id: userId, ok: true });
+    } catch (e: any) {
+      details.push({ email, ok: false, error: e?.message || String(e) });
+    }
   }
 
-  return NextResponse.json({ ok:true, upserted: up?.length||0, details: results });
+  return NextResponse.json({ upserted, details });
 }
