@@ -1,7 +1,6 @@
 // File: app/admin/AdminSurveyInviteManager.tsx
 'use client';
 import { useEffect, useMemo, useState } from 'react';
-import Papa from 'papaparse';
 import { supabase } from '@/lib/supabaseClient';
 
 type Project = { id: string; title: string };
@@ -27,6 +26,82 @@ const BTN =
   'px-3 py-2 rounded-lg font-semibold bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50';
 const BTN2 =
   'px-3 py-2 rounded-lg font-semibold border border-slate-300 hover:bg-slate-50 disabled:opacity-50';
+
+/** --- Lightweight CSV parser (no dependency) ---
+ *  - Supports commas, quotes, escaped quotes ("")
+ *  - Supports CRLF/LF newlines
+ *  - Returns array of objects using header row
+ */
+function parseCsvToObjects(text: string): Record<string, string>[] {
+  const rows: string[][] = [];
+  const s = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').replace(/^\uFEFF/, ''); // strip BOM
+  let i = 0, field = '', row: string[] = [], inQuotes = false;
+
+  while (i < s.length) {
+    const c = s[i];
+
+    if (inQuotes) {
+      if (c === '"') {
+        const next = s[i + 1];
+        if (next === '"') {
+          field += '"'; // escaped quote
+          i += 2;
+          continue;
+        } else {
+          inQuotes = false;
+          i++;
+          continue;
+        }
+      } else {
+        field += c;
+        i++;
+        continue;
+      }
+    } else {
+      if (c === '"') {
+        inQuotes = true;
+        i++;
+        continue;
+      }
+      if (c === ',') {
+        row.push(field);
+        field = '';
+        i++;
+        continue;
+      }
+      if (c === '\n') {
+        row.push(field);
+        rows.push(row);
+        row = [];
+        field = '';
+        i++;
+        continue;
+      }
+      field += c;
+      i++;
+    }
+  }
+  // flush last field/row
+  row.push(field);
+  rows.push(row);
+
+  // remove empty trailing rows
+  while (rows.length && rows[rows.length - 1].every((v) => v.trim() === '')) rows.pop();
+
+  if (rows.length === 0) return [];
+  const header = rows[0].map((h) => h.trim());
+  const out: Record<string, string>[] = [];
+  for (let r = 1; r < rows.length; r++) {
+    const obj: Record<string, string> = {};
+    const rowVals = rows[r];
+    header.forEach((h, idx) => {
+      obj[h] = (rowVals[idx] ?? '').trim();
+    });
+    // skip fully empty lines
+    if (Object.values(obj).some((v) => v !== '')) out.push(obj);
+  }
+  return out;
+}
 
 export default function AdminSurveyInviteManager() {
   const [projects, setProjects] = useState<Project[]>([]);
@@ -113,22 +188,29 @@ export default function AdminSurveyInviteManager() {
     [checkedProfiles]
   );
 
-  // CSV upload → server bulk-upsert
+  // CSV upload → server bulk-upsert (no papaparse)
   async function onUploadCsv(file: File) {
     setLoading(true);
     setMsg('Đang xử lý CSV...');
     try {
       const csvText = await file.text();
-      const parsed = Papa.parse(csvText, { header: true, skipEmptyLines: true });
-      const rows = (parsed.data as any[])
-        .map((r) => ({
-          full_name: String(r.full_name || r.name || '').trim(),
-          email: String(r.email || '').trim().toLowerCase(),
-          org: r.org || null,
-          title: r.title || null,
-          phone: r.phone || null,
-        }))
+      const parsedRows = parseCsvToObjects(csvText);
+
+      // Chuẩn hóa header: chấp nhận full_name hoặc name
+      const rows = parsedRows
+        .map((r) => {
+          const full_name = String(r['full_name'] ?? r['name'] ?? '').trim();
+          const email = String(r['email'] ?? '').trim().toLowerCase();
+          const org = (r['org'] ?? '').trim();
+          const title = (r['title'] ?? '').trim();
+          const phone = (r['phone'] ?? '').trim();
+          return { full_name, email, org: org || null, title: title || null, phone: phone || null };
+        })
         .filter((r) => r.full_name && r.email);
+
+      if (rows.length === 0) {
+        throw new Error('Không tìm thấy dòng hợp lệ. Yêu cầu header: full_name,email (có thể kèm org,title,phone).');
+      }
 
       const res = await fetch('/api/experts/bulk-upsert', {
         method: 'POST',
@@ -137,6 +219,7 @@ export default function AdminSurveyInviteManager() {
       });
       const d = await res.json();
       if (d.error) throw new Error(d.error);
+
       setMsg(
         `✅ Đã cập nhật danh bạ: ${d.upserted} email. Tự tạo profiles cho ${
           d.details?.filter((x: any) => x.created_profile).length || 0
