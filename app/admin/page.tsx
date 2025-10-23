@@ -1,12 +1,15 @@
 'use client';
+import { useState } from 'react';
+
 import AdminUserManager from './AdminUserManager';
 import AdminProjectManager from './AdminProjectManager';
 import AdminRoundManager from './AdminRoundManager';
 import AdminItemManager from './AdminItemManager';
-import { useState } from 'react';
+import AdminSurveyInviteManager from './AdminSurveyInviteManager';
 
 export default function AdminPage() {
-  const [tab, setTab] = useState<'users'|'projects'|'rounds'|'items'>('users');
+  const [tab, setTab] = useState<'users' | 'projects' | 'rounds' | 'items' | 'invites'>('users');
+
   return (
     <div className="flex min-h-screen">
       {/* Sidebar */}
@@ -15,37 +18,65 @@ export default function AdminPage() {
           <ul className="space-y-3">
             <li>
               <button
-                className={`block w-full text-left px-3 py-2 rounded ${tab === 'users' ? 'bg-blue-600 text-white font-bold' : 'hover:bg-blue-100'}`}
+                className={`block w-full text-left px-3 py-2 rounded ${
+                  tab === 'users' ? 'bg-blue-600 text-white font-bold' : 'hover:bg-blue-100'
+                }`}
                 onClick={() => setTab('users')}
-              >👤 Người dùng</button>
+              >
+                👤 Người dùng
+              </button>
             </li>
             <li>
               <button
-                className={`block w-full text-left px-3 py-2 rounded ${tab === 'projects' ? 'bg-blue-600 text-white font-bold' : 'hover:bg-blue-100'}`}
+                className={`block w-full text-left px-3 py-2 rounded ${
+                  tab === 'projects' ? 'bg-blue-600 text-white font-bold' : 'hover:bg-blue-100'
+                }`}
                 onClick={() => setTab('projects')}
-              >📁 Project</button>
+              >
+                📁 Project
+              </button>
             </li>
             <li>
               <button
-                className={`block w-full text-left px-3 py-2 rounded ${tab === 'rounds' ? 'bg-blue-600 text-white font-bold' : 'hover:bg-blue-100'}`}
+                className={`block w-full text-left px-3 py-2 rounded ${
+                  tab === 'rounds' ? 'bg-blue-600 text-white font-bold' : 'hover:bg-blue-100'
+                }`}
                 onClick={() => setTab('rounds')}
-              >🔄 Round</button>
+              >
+                🔄 Round
+              </button>
             </li>
             <li>
               <button
-                className={`block w-full text-left px-3 py-2 rounded ${tab === 'items' ? 'bg-blue-600 text-white font-bold' : 'hover:bg-blue-100'}`}
+                className={`block w-full text-left px-3 py-2 rounded ${
+                  tab === 'items' ? 'bg-blue-600 text-white font-bold' : 'hover:bg-blue-100'
+                }`}
                 onClick={() => setTab('items')}
-              >📝 Item</button>
+              >
+                📝 Item
+              </button>
+            </li>
+            <li>
+              <button
+                className={`block w-full text-left px-3 py-2 rounded ${
+                  tab === 'invites' ? 'bg-blue-600 text-white font-bold' : 'hover:bg-blue-100'
+                }`}
+                onClick={() => setTab('invites')}
+              >
+                ✉️ Mời khảo sát
+              </button>
             </li>
           </ul>
         </nav>
       </aside>
+
       {/* Main content */}
       <main className="flex-1 p-8 bg-white">
         {tab === 'users' && <AdminUserManager />}
         {tab === 'projects' && <AdminProjectManager />}
         {tab === 'rounds' && <AdminRoundManager />}
         {tab === 'items' && <AdminItemManager />}
+        {tab === 'invites' && <AdminSurveyInviteManager />}
       </main>
     </div>
   );
