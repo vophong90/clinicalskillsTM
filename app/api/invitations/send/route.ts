@@ -138,18 +138,19 @@ export async function POST(req: NextRequest) {
       });
 
       // (Optional) log
-      await s.from('email_log').insert({
-        to_email: u.email,
-        subject: body.email.subject,
-        meta: {
-          profile_id: u.id,
-          round_ids: body.round_ids,
-          mode: body.mode
-        },
-        provider_message_id: (se as any)?.data?.id || null
-      });
-
-      results.push({ email: u.email, ok:true });
+    await s.from('email_log').insert({
+      to_email: u.email,
+      subject: body.email.subject,
+      meta: {
+        profile_id: u.id,
+        round_ids: body.round_ids,
+        mode: body.mode
+      },
+      profile_id: u.id,
+      round_ids: body.round_ids,
+      mode: body.mode,
+      provider_message_id: (se as any)?.data?.id || null
+    });
 
       // pacing nhẹ để tránh spam provider, có thể chỉnh nhỏ xuống nếu muốn
       await new Promise(r => setTimeout(r, 80));
