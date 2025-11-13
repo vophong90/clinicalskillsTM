@@ -123,6 +123,7 @@ export default function AdminSurveyInviteManager() {
   const [progress, setProgress] = useState<ProgressRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState('');
+  const [emailStats, setEmailStats] = useState<Record<string, string | null>>({});
 
   // ===== LOAD DATA =====
   useEffect(() => {
@@ -186,6 +187,51 @@ export default function AdminSurveyInviteManager() {
     [checkedProfiles]
   );
 
+    // ===== EMAIL STATS (đã gửi email chưa cho các vòng đang chọn) =====
+  useEffect(() => {
+    // Nếu chưa chọn vòng hoặc không có profile nào đang hiển thị thì clear
+    if (selectedRoundIds.length === 0 || filteredProfiles.length === 0) {
+      setEmailStats({});
+      return;
+    }
+
+    (async () => {
+      try {
+        const profileIds = filteredProfiles.map((p) => p.id);
+
+        const { data, error } = await supabase
+          .from('email_log')
+          .select('profile_id, round_ids, sent_at, status')
+          .eq('status', 'sent') // chỉ tính email gửi thành công
+          .in('profile_id', profileIds)
+          .overlaps('round_ids', selectedRoundIds);
+
+        if (error) {
+          console.error('Lỗi load email_log:', error);
+          setEmailStats({});
+          return;
+        }
+
+        const map: Record<string, string> = {};
+        (data || []).forEach((row: any) => {
+          const pid = row.profile_id as string | null;
+          const sentAt = row.sent_at as string | null;
+          if (!pid || !sentAt) return;
+
+          const prev = map[pid];
+          if (!prev || new Date(sentAt).getTime() > new Date(prev).getTime()) {
+            map[pid] = sentAt; // lưu lần gửi mới nhất
+          }
+        });
+
+        setEmailStats(map);
+      } catch (err) {
+        console.error('Lỗi xử lý emailStats:', err);
+        setEmailStats({});
+      }
+    })();
+  }, [filteredProfiles, selectedRoundIds]);
+  
   // ===== CSV upload → server bulk-upsert =====
   async function onUploadCsv(file: File) {
     setLoading(true);
@@ -419,27 +465,52 @@ export default function AdminSurveyInviteManager() {
           </div>
         </div>
 
-        <div className="border rounded max-h-80 overflow-auto">
-          {filteredProfiles.map((u) => (
-            <label key={u.id} className="flex items-center gap-2 px-3 py-2 border-b last:border-b-0">
-              <input
-                type="checkbox"
-                checked={!!checkedProfiles[u.id]}
-                onChange={(e) =>
-                  setCheckedProfiles((prev) => ({
-                    ...prev,
-                    [u.id]: e.target.checked,
-                  }))
-                }
-              />
-              <span className="text-sm">
-                <b>{u.name || u.email}</b>{' '}
-                <span className="text-slate-500">
-                  ({u.email}) – <i>{u.role}</i>
-                </span>
-              </span>
-            </label>
-          ))}
+                <div className="border rounded max-h-80 overflow-auto">
+          {filteredProfiles.map((u) => {
+            const lastSent = selectedRoundIds.length ? emailStats[u.id] : null;
+
+            return (
+              <label
+                key={u.id}
+                className="flex items-center gap-2 px-3 py-2 border-b last:border-b-0"
+              >
+                <input
+                  type="checkbox"
+                  checked={!!checkedProfiles[u.id]}
+                  onChange={(e) =>
+                    setCheckedProfiles((prev) => ({
+                      ...prev,
+                      [u.id]: e.target.checked,
+                    }))
+                  }
+                />
+                <div className="flex flex-col text-sm">
+                  <span>
+                    <b>{u.name || u.email}</b>{' '}
+                    <span className="text-slate-500">
+                      ({u.email}) – <i>{u.role}</i>
+                    </span>
+                  </span>
+
+                  {/* Dòng hiển thị trạng thái email */}
+                  {selectedRoundIds.length === 0 ? (
+                    <span className="text-xs text-slate-400">
+                      Chọn vòng ở bước 2 để xem trạng thái email.
+                    </span>
+                  ) : lastSent ? (
+                    <span className="text-xs text-emerald-700">
+                      Đã gửi email (cho ít nhất 1 vòng đã chọn) lần cuối:{' '}
+                      {new Date(lastSent).toLocaleString()}
+                    </span>
+                  ) : (
+                    <span className="text-xs text-slate-500">
+                      Chưa gửi email cho các vòng đã chọn.
+                    </span>
+                  )}
+                </div>
+              </label>
+            );
+          })}
           {filteredProfiles.length === 0 && (
             <div className="p-3 text-slate-500 text-sm">Không có người phù hợp bộ lọc.</div>
           )}
