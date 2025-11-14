@@ -188,7 +188,7 @@ export default function AdminSurveyInviteManager() {
     [checkedProfiles]
   );
 
-  // ===== EMAIL STATS (đã gửi email chưa cho các vòng đang chọn) =====
+ // ===== EMAIL STATS (đã gửi email chưa cho các vòng đang chọn) =====
 useEffect(() => {
   if (selectedRoundIds.length === 0 || filteredProfiles.length === 0) {
     setEmailStats({});
@@ -197,15 +197,12 @@ useEffect(() => {
 
   (async () => {
     try {
-      const profileIds = filteredProfiles.map((p) => p.id);
-
       const { data, error } = await supabase
         .from('email_log')
         .select('profile_id, round_ids, sent_at, status, mode')
-        .eq('status', 'sent')          // chỉ log gửi thành công
-        .eq('mode', 'invite')          // chỉ tính email mời
-        .in('profile_id', profileIds)  // chỉ các profile đang hiển thị
-        .overlaps('round_ids', selectedRoundIds); // có giao với các vòng đang chọn
+        .eq('status', 'sent')        // chỉ log gửi thành công
+        .eq('mode', 'invite')        // chỉ email mời
+        .overlaps('round_ids', selectedRoundIds); // có giao với các vòng đã chọn
 
       if (error) {
         console.error('Lỗi load email_log:', error);
@@ -213,7 +210,6 @@ useEffect(() => {
         return;
       }
 
-      // Debug thêm cho chắc
       console.log('email_log rows:', data);
 
       const map: Record<string, string> = {};
@@ -224,7 +220,7 @@ useEffect(() => {
 
         const prev = map[pid];
         if (!prev || new Date(sentAt).getTime() > new Date(prev).getTime()) {
-          map[pid] = sentAt; // lưu lần gửi mới nhất
+          map[pid] = sentAt; // lần gửi mới nhất cho profile này
         }
       });
 
