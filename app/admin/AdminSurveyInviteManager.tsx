@@ -202,9 +202,10 @@ useEffect(() => {
       const { data, error } = await supabase
         .from('email_log')
         .select('profile_id, round_ids, sent_at, status, mode')
-        .eq('status', 'sent')       // chỉ log gửi thành công
-        .eq('mode', 'invite')       // chỉ tính email mời (không tính remind nếu có)
-        .in('profile_id', profileIds);
+        .eq('status', 'sent')          // chỉ log gửi thành công
+        .eq('mode', 'invite')          // chỉ tính email mời
+        .in('profile_id', profileIds)  // chỉ các profile đang hiển thị
+        .overlaps('round_ids', selectedRoundIds); // có giao với các vòng đang chọn
 
       if (error) {
         console.error('Lỗi load email_log:', error);
@@ -212,17 +213,14 @@ useEffect(() => {
         return;
       }
 
-      const targetRounds = new Set(selectedRoundIds);
-      const map: Record<string, string> = {};
+      // Debug thêm cho chắc
+      console.log('email_log rows:', data);
 
+      const map: Record<string, string> = {};
       (data || []).forEach((row: any) => {
         const pid = row.profile_id as string | null;
         const sentAt = row.sent_at as string | null;
-        const rounds: string[] = row.round_ids || [];
-
-        if (!pid || !sentAt || !Array.isArray(rounds)) return;
-        // Tự kiểm tra overlap giữa round_ids và selectedRoundIds
-        if (!rounds.some((rid) => targetRounds.has(rid))) return;
+        if (!pid || !sentAt) return;
 
         const prev = map[pid];
         if (!prev || new Date(sentAt).getTime() > new Date(prev).getTime()) {
@@ -230,6 +228,7 @@ useEffect(() => {
         }
       });
 
+      console.log('emailStats map:', map);
       setEmailStats(map);
     } catch (err) {
       console.error('Lỗi xử lý emailStats:', err);
