@@ -124,6 +124,7 @@ export default function AdminSurveyInviteManager() {
   const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState('');
   const [emailStats, setEmailStats] = useState<Record<string, string | null>>({});
+  const [emailReloadTick, setEmailReloadTick] = useState(0);
 
   // ===== LOAD DATA =====
   useEffect(() => {
@@ -187,50 +188,55 @@ export default function AdminSurveyInviteManager() {
     [checkedProfiles]
   );
 
-    // ===== EMAIL STATS (đã gửi email chưa cho các vòng đang chọn) =====
-  useEffect(() => {
-    // Nếu chưa chọn vòng hoặc không có profile nào đang hiển thị thì clear
-    if (selectedRoundIds.length === 0 || filteredProfiles.length === 0) {
-      setEmailStats({});
-      return;
-    }
+  // ===== EMAIL STATS (đã gửi email chưa cho các vòng đang chọn) =====
+useEffect(() => {
+  if (selectedRoundIds.length === 0 || filteredProfiles.length === 0) {
+    setEmailStats({});
+    return;
+  }
 
-    (async () => {
-      try {
-        const profileIds = filteredProfiles.map((p) => p.id);
+  (async () => {
+    try {
+      const profileIds = filteredProfiles.map((p) => p.id);
 
-        const { data, error } = await supabase
-          .from('email_log')
-          .select('profile_id, round_ids, sent_at, status')
-          .eq('status', 'sent') // chỉ tính email gửi thành công
-          .in('profile_id', profileIds)
-          .overlaps('round_ids', selectedRoundIds);
+      const { data, error } = await supabase
+        .from('email_log')
+        .select('profile_id, round_ids, sent_at, status, mode')
+        .eq('status', 'sent')       // chỉ log gửi thành công
+        .eq('mode', 'invite')       // chỉ tính email mời (không tính remind nếu có)
+        .in('profile_id', profileIds);
 
-        if (error) {
-          console.error('Lỗi load email_log:', error);
-          setEmailStats({});
-          return;
-        }
-
-        const map: Record<string, string> = {};
-        (data || []).forEach((row: any) => {
-          const pid = row.profile_id as string | null;
-          const sentAt = row.sent_at as string | null;
-          if (!pid || !sentAt) return;
-
-          const prev = map[pid];
-          if (!prev || new Date(sentAt).getTime() > new Date(prev).getTime()) {
-            map[pid] = sentAt; // lưu lần gửi mới nhất
-          }
-        });
-
-        setEmailStats(map);
-      } catch (err) {
-        console.error('Lỗi xử lý emailStats:', err);
+      if (error) {
+        console.error('Lỗi load email_log:', error);
         setEmailStats({});
+        return;
       }
-    })();
-  }, [filteredProfiles, selectedRoundIds]);
+
+      const targetRounds = new Set(selectedRoundIds);
+      const map: Record<string, string> = {};
+
+      (data || []).forEach((row: any) => {
+        const pid = row.profile_id as string | null;
+        const sentAt = row.sent_at as string | null;
+        const rounds: string[] = row.round_ids || [];
+
+        if (!pid || !sentAt || !Array.isArray(rounds)) return;
+        // Tự kiểm tra overlap giữa round_ids và selectedRoundIds
+        if (!rounds.some((rid) => targetRounds.has(rid))) return;
+
+        const prev = map[pid];
+        if (!prev || new Date(sentAt).getTime() > new Date(prev).getTime()) {
+          map[pid] = sentAt; // lưu lần gửi mới nhất
+        }
+      });
+
+      setEmailStats(map);
+    } catch (err) {
+      console.error('Lỗi xử lý emailStats:', err);
+      setEmailStats({});
+    }
+  })();
+}, [filteredProfiles, selectedRoundIds, emailReloadTick]);
   
   // ===== CSV upload → server bulk-upsert =====
   async function onUploadCsv(file: File) {
@@ -333,6 +339,7 @@ export default function AdminSurveyInviteManager() {
       // giữ nguyên selection hoặc reset tuỳ bạn — ở đây reset
       setCheckedProfiles({});
       await reloadProgress();
+      setEmailReloadTick((t) => t + 1);
     } catch (e: any) {
       setMsg('❌ Lỗi gửi email: ' + (e?.message || String(e)));
     } finally {
