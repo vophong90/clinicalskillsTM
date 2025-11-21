@@ -104,6 +104,9 @@ export default function AdminSurveyInviteManager() {
   const [filterProject, setFilterProject] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
   const [filterRole, setFilterRole] = useState<'' | 'core_expert' | 'external_expert'>('');
+  const [filterEmailAge, setFilterEmailAge] = useState<
+    '' | 'never' | 'recent_7' | 'older_7'
+  >('');
   const [selectedRoundIds, setSelectedRoundIds] = useState<string[]>([]);
   const [checkedProfiles, setCheckedProfiles] = useState<Record<string, boolean>>({});
   const [q, setQ] = useState('');
@@ -126,29 +129,65 @@ export default function AdminSurveyInviteManager() {
   const [emailStats, setEmailStats] = useState<Record<string, string | null>>({});
   const [emailReloadTick, setEmailReloadTick] = useState(0);
 
+  // ===== Helper: load tất cả profiles theo trang =====
+  async function fetchAllProfiles(): Promise<Profile[]> {
+    const PAGE = 1000;
+    let from = 0;
+    let all: Profile[] = [];
+    while (true) {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('id,email,name,role')
+        .order('email')
+        .range(from, from + PAGE - 1);
+
+      if (error) {
+        console.error('Lỗi load profiles:', error);
+        break;
+      }
+
+      const batch = (data as Profile[]) || [];
+      if (!batch.length) break;
+
+      all = all.concat(batch);
+      if (batch.length < PAGE) break;
+      from += PAGE;
+    }
+    return all;
+  }
+
   // ===== LOAD DATA =====
   useEffect(() => {
     (async () => {
-      const [pr, rd, pf] = await Promise.all([
+      const [pr, rd] = await Promise.all([
         supabase.from('projects').select('id,title,status').order('title'),
         supabase.from('rounds').select('id,project_id,round_number').order('round_number'),
-        supabase.from('profiles').select('id,email,name,role').order('email'),
       ]);
       setProjects((pr.data as Project[]) || []);
       setRounds((rd.data as Round[]) || []);
-      setProfiles((pf.data as Profile[]) || []);
+
+      const allProfiles = await fetchAllProfiles();
+      setProfiles(allProfiles);
     })();
   }, []);
 
   // ===== PROGRESS =====
   async function reloadProgress() {
+    // Nếu chưa chọn filter nào → không load, chỉ clear
+    if (!filterProject && !filterStatus) {
+      setProgress([]);
+      return;
+    }
+
     const params = new URLSearchParams();
     if (filterProject) params.set('project_id', filterProject);
     if (filterStatus) params.set('status', filterStatus);
+
     const r = await fetch('/api/surveys/progress?' + params.toString());
     const d = await r.json();
     setProgress(d.items || []);
   }
+
   useEffect(() => {
     reloadProgress();
   }, [filterProject, filterStatus]);
@@ -174,52 +213,86 @@ export default function AdminSurveyInviteManager() {
     );
   }
 
-  const filteredProfiles = useMemo(() => {
+  // Lọc cơ bản (không dùng emailStats)
+  const baseProfiles = useMemo(() => {
     const k = q.trim().toLowerCase();
     return profiles.filter((p) => {
       if (filterRole && p.role !== filterRole) return false;
-      const hit = !k || p.email.toLowerCase().includes(k) || (p.name || '').toLowerCase().includes(k);
+      const hit =
+        !k ||
+        p.email.toLowerCase().includes(k) ||
+        (p.name || '').toLowerCase().includes(k);
       return hit;
     });
   }, [profiles, q, filterRole]);
+
+  // Lọc tiếp theo “độ tuổi” email gửi lần cuối (7 ngày)
+  const filteredProfiles = useMemo(() => {
+    if (!filterEmailAge || selectedRoundIds.length === 0) {
+      return baseProfiles;
+    }
+
+    const now = new Date();
+
+    return baseProfiles.filter((p) => {
+      const last = emailStats[p.id]; // string | null | undefined
+
+      if (filterEmailAge === 'never') {
+        return !last;
+      }
+
+      if (!last) return false;
+
+      const lastDate = new Date(last);
+      if (Number.isNaN(lastDate.getTime())) return false;
+
+      const diffMs = now.getTime() - lastDate.getTime();
+      const diffDays = diffMs / (1000 * 60 * 60 * 24);
+
+      if (filterEmailAge === 'recent_7') return diffDays <= 7;
+      if (filterEmailAge === 'older_7') return diffDays > 7;
+
+      return true;
+    });
+  }, [baseProfiles, filterEmailAge, selectedRoundIds, emailStats]);
 
   const checkedIds = useMemo(
     () => Object.keys(checkedProfiles).filter((id) => checkedProfiles[id]),
     [checkedProfiles]
   );
 
- // ===== EMAIL STATS (đã gửi email chưa cho các vòng đang chọn) =====
+  // ===== EMAIL STATS (đã gửi email chưa cho các vòng đang chọn) =====
   useEffect(() => {
-  if (selectedRoundIds.length === 0 || filteredProfiles.length === 0) {
-    setEmailStats({});
-    return;
-  }
-
-  (async () => {
-    try {
-      const profileIds = filteredProfiles.map(u => u.id);
-      const res = await fetch('/api/email/stats', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          profile_ids: profileIds,
-          round_ids: selectedRoundIds,
-        }),
-      });
-      const d = await res.json();
-      if (d.error) {
-        console.error('Lỗi load email stats:', d.error);
-        setEmailStats({});
-        return;
-      }
-      setEmailStats(d.stats || {});
-    } catch (e) {
-      console.error('Lỗi gọi /api/email/stats:', e);
+    if (selectedRoundIds.length === 0 || baseProfiles.length === 0) {
       setEmailStats({});
+      return;
     }
-  })();
-}, [filteredProfiles, selectedRoundIds, emailReloadTick]);
-  
+
+    (async () => {
+      try {
+        const profileIds = baseProfiles.map((u) => u.id);
+        const res = await fetch('/api/email/stats', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            profile_ids: profileIds,
+            round_ids: selectedRoundIds,
+          }),
+        });
+        const d = await res.json();
+        if (d.error) {
+          console.error('Lỗi load email stats:', d.error);
+          setEmailStats({});
+          return;
+        }
+        setEmailStats(d.stats || {});
+      } catch (e) {
+        console.error('Lỗi gọi /api/email/stats:', e);
+        setEmailStats({});
+      }
+    })();
+  }, [baseProfiles, selectedRoundIds, emailReloadTick]);
+
   // ===== CSV upload → server bulk-upsert =====
   async function onUploadCsv(file: File) {
     setLoading(true);
@@ -264,9 +337,9 @@ export default function AdminSurveyInviteManager() {
         } người.`
       );
 
-      // refresh profiles
-      const pf = await supabase.from('profiles').select('id,email,name,role').order('email');
-      setProfiles(pf.data || []);
+      // refresh profiles (phân trang)
+      const allProfiles = await fetchAllProfiles();
+      setProfiles(allProfiles);
     } catch (e: any) {
       setMsg('❌ Lỗi CSV: ' + (e?.message || String(e)));
     } finally {
@@ -318,7 +391,6 @@ export default function AdminSurveyInviteManager() {
       if (d.error) throw new Error(d.error);
       const ok = d.results?.filter((x: any) => x.ok).length || 0;
       setMsg(`Đã gửi ${ok}/${d.results?.length || 0} email.`);
-      // giữ nguyên selection hoặc reset tuỳ bạn — ở đây reset
       setCheckedProfiles({});
       await reloadProgress();
       setEmailReloadTick((t) => t + 1);
@@ -438,6 +510,20 @@ export default function AdminSurveyInviteManager() {
             <option value="core_expert">Chuyên gia nòng cốt</option>
             <option value="external_expert">Chuyên gia bên ngoài</option>
           </select>
+
+          {/* Lọc theo ngày gửi email cuối cùng (7 ngày) */}
+          <select
+            className={INPUT + ' md:w-64'}
+            value={filterEmailAge}
+            onChange={(e) => setFilterEmailAge(e.target.value as any)}
+            disabled={selectedRoundIds.length === 0}
+          >
+            <option value="">— Lọc theo lần gửi email —</option>
+            <option value="never">Chưa từng gửi (cho các vòng đã chọn)</option>
+            <option value="recent_7">Đã gửi trong 7 ngày gần đây</option>
+            <option value="older_7">Đã gửi cách đây &gt; 7 ngày</option>
+          </select>
+
           <div className="flex items-center gap-2">
             <button className={BTN2} onClick={selectAllFiltered}>
               Chọn tất cả (theo bộ lọc)
@@ -454,7 +540,7 @@ export default function AdminSurveyInviteManager() {
           </div>
         </div>
 
-                <div className="border rounded max-h-80 overflow-auto">
+        <div className="border rounded max-h-80 overflow-auto">
           {filteredProfiles.map((u) => {
             const lastSent = selectedRoundIds.length ? emailStats[u.id] : null;
 
@@ -481,7 +567,6 @@ export default function AdminSurveyInviteManager() {
                     </span>
                   </span>
 
-                  {/* Dòng hiển thị trạng thái email */}
                   {selectedRoundIds.length === 0 ? (
                     <span className="text-xs text-slate-400">
                       Chọn vòng ở bước 2 để xem trạng thái email.
@@ -510,10 +595,15 @@ export default function AdminSurveyInviteManager() {
       <div className="space-y-2">
         <div className="font-semibold">4) Soạn email</div>
         <label className="block text-sm">Tiêu đề</label>
-        <input className={INPUT} value={emailSubject} onChange={(e) => setEmailSubject(e.target.value)} />
+        <input
+          className={INPUT}
+          value={emailSubject}
+          onChange={(e) => setEmailSubject(e.target.value)}
+        />
         <label className="block text-sm">
-          Nội dung HTML (hỗ trợ biến: <code>{'{{full_name}}'}</code>, <code>{'{{email}}'}</code>,{' '}
-          <code>{'{{project_list}}'}</code>, <code>{'{{open_button}}'}</code>)
+          Nội dung HTML (hỗ trợ biến: <code>{'{{full_name}}'}</code>,{' '}
+          <code>{'{{email}}'}</code>, <code>{'{{project_list}}'}</code>,{' '}
+          <code>{'{{open_button}}'}</code>)
         </label>
         <textarea
           className={INPUT + ' h-48 font-mono'}
@@ -569,7 +659,7 @@ export default function AdminSurveyInviteManager() {
             Làm mới
           </button>
         </div>
-        <div className="border rounded overflow-auto">
+        <div className="border rounded max-h-96 overflow-auto">
           <table className="min-w-full text-sm">
             <thead className="bg-slate-50">
               <tr>
@@ -593,17 +683,25 @@ export default function AdminSurveyInviteManager() {
                     {r.status === 'submitted' ? (
                       <span className="px-2 py-1 rounded bg-green-100 text-green-700">Đã nộp</span>
                     ) : (
-                      <span className="px-2 py-1 rounded bg-yellow-100 text-yellow-700">Chưa nộp</span>
+                      <span className="px-2 py-1 rounded bg-yellow-100 text-yellow-700">
+                        Chưa nộp
+                      </span>
                     )}
                   </td>
-                  <td className="p-2 text-center">{r.invited_at ? new Date(r.invited_at).toLocaleString() : '—'}</td>
-                  <td className="p-2 text-center">{r.responded_at ? new Date(r.responded_at).toLocaleString() : '—'}</td>
+                  <td className="p-2 text-center">
+                    {r.invited_at ? new Date(r.invited_at).toLocaleString() : '—'}
+                  </td>
+                  <td className="p-2 text-center">
+                    {r.responded_at ? new Date(r.responded_at).toLocaleString() : '—'}
+                  </td>
                 </tr>
               ))}
               {progress.length === 0 && (
                 <tr>
                   <td colSpan={6} className="p-4 text-center text-slate-500">
-                    Không có dữ liệu
+                    {!filterProject && !filterStatus
+                      ? 'Chọn Project hoặc Trạng thái để xem tiến độ.'
+                      : 'Không có dữ liệu cho bộ lọc hiện tại.'}
                   </td>
                 </tr>
               )}
