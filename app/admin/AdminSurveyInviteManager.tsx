@@ -189,7 +189,7 @@ export default function AdminSurveyInviteManager() {
   );
 
  // ===== EMAIL STATS (đã gửi email chưa cho các vòng đang chọn) =====
-useEffect(() => {
+  useEffect(() => {
   if (selectedRoundIds.length === 0 || filteredProfiles.length === 0) {
     setEmailStats({});
     return;
@@ -197,37 +197,24 @@ useEffect(() => {
 
   (async () => {
     try {
-      const { data, error } = await supabase
-        .from('email_log')
-        .select('profile_id, round_ids, sent_at, status, mode')
-        .eq('status', 'sent')        // chỉ log gửi thành công
-        .eq('mode', 'invite')        // chỉ email mời
-        .overlaps('round_ids', selectedRoundIds); // có giao với các vòng đã chọn
-
-      if (error) {
-        console.error('Lỗi load email_log:', error);
+      const profileIds = filteredProfiles.map(u => u.id);
+      const res = await fetch('/api/email/stats', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          profile_ids: profileIds,
+          round_ids: selectedRoundIds,
+        }),
+      });
+      const d = await res.json();
+      if (d.error) {
+        console.error('Lỗi load email stats:', d.error);
         setEmailStats({});
         return;
       }
-
-      console.log('email_log rows:', data);
-
-      const map: Record<string, string> = {};
-      (data || []).forEach((row: any) => {
-        const pid = row.profile_id as string | null;
-        const sentAt = row.sent_at as string | null;
-        if (!pid || !sentAt) return;
-
-        const prev = map[pid];
-        if (!prev || new Date(sentAt).getTime() > new Date(prev).getTime()) {
-          map[pid] = sentAt; // lần gửi mới nhất cho profile này
-        }
-      });
-
-      console.log('emailStats map:', map);
-      setEmailStats(map);
-    } catch (err) {
-      console.error('Lỗi xử lý emailStats:', err);
+      setEmailStats(d.stats || {});
+    } catch (e) {
+      console.error('Lỗi gọi /api/email/stats:', e);
       setEmailStats({});
     }
   })();
