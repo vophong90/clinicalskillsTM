@@ -25,12 +25,18 @@ type Project = {
 
 function translateRole(roleId: string) {
   switch (roleId) {
-    case "admin": return "Quản trị viên";
-    case "secretary": return "Thư ký hội đồng";
-    case "viewer": return "Quan sát viên";
-    case "core_expert": return "Chuyên gia nòng cốt";
-    case "external_expert": return "Chuyên gia bên ngoài";
-    default: return roleId;
+    case 'admin':
+      return 'Quản trị viên';
+    case 'secretary':
+      return 'Thư ký hội đồng';
+    case 'viewer':
+      return 'Quan sát viên';
+    case 'core_expert':
+      return 'Chuyên gia nòng cốt';
+    case 'external_expert':
+      return 'Chuyên gia bên ngoài';
+    default:
+      return roleId;
   }
 }
 
@@ -40,6 +46,10 @@ export default function Dashboard() {
   const [isAdmin, setIsAdmin] = useState<boolean>(false);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
+  // NEW: danh sách các round mà user đã nộp bản cuối
+  const [submittedRoundIds, setSubmittedRoundIds] = useState<Set<string>>(
+    () => new Set()
+  );
 
   const router = useRouter();
 
@@ -79,22 +89,44 @@ export default function Dashboard() {
       setIsAdmin(profile.role === 'admin');
 
       // Lấy quyền từ bảng permissions (chỉ để lấy danh sách dự án, KHÔNG kiểm tra admin ở đây)
-const { data: permissionsData, error: permissionsError } = await supabase
-  .from('permissions')
-  .select('role, project_id')
-  .eq('user_id', profile.id);
+      const { data: permissionsData, error: permissionsError } = await supabase
+        .from('permissions')
+        .select('role, project_id')
+        .eq('user_id', profile.id);
 
-if (permissionsError) {
-  setError('❌ Lỗi truy vấn permissions: ' + permissionsError.message);
-  setLoading(false);
-  return;
-}
+      if (permissionsError) {
+        setError('❌ Lỗi truy vấn permissions: ' + permissionsError.message);
+        setLoading(false);
+        return;
+      }
 
-// Nếu không thuộc dự án nào thì vẫn có thể là admin hệ thống!
-const projectIds = permissionsData?.map(p => p.project_id) || [];
+      // Nếu không thuộc dự án nào thì vẫn có thể là admin hệ thống!
+      const projectIds = permissionsData?.map((p) => p.project_id) || [];
 
-// Kiểm tra quyền admin HỆ THỐNG từ profile
-setIsAdmin(profile.role === 'admin');
+      // Kiểm tra quyền admin HỆ THỐNG từ profile
+      setIsAdmin(profile.role === 'admin');
+
+      // NEW: lấy tất cả round mà user này đã nộp bản cuối
+      try {
+        const { data: submittedResps, error: submittedErr } = await supabase
+          .from('responses')
+          .select('round_id')
+          .eq('user_id', profile.id)
+          .eq('is_submitted', true)
+          .range(0, 999999);
+
+        if (submittedErr) {
+          console.error('Lỗi truy vấn trạng thái nộp:', submittedErr.message);
+        } else if (submittedResps) {
+          const s = new Set<string>();
+          submittedResps.forEach((row: { round_id: string | null }) => {
+            if (row.round_id) s.add(row.round_id);
+          });
+          setSubmittedRoundIds(s);
+        }
+      } catch (e) {
+        console.error('Lỗi khi lấy submittedRoundIds', e);
+      }
 
       // Lấy projects
       const { data: projectsData } = await supabase
@@ -109,9 +141,9 @@ setIsAdmin(profile.role === 'admin');
         .in('project_id', projectIds);
 
       // Map projects với rounds và role
-      const finalProjects: Project[] = (projectsData || []).map(proj => {
-        const matched = permissionsData.find(p => p.project_id === proj.id);
-        const rounds = (roundsData || []).filter(r => r.project_id === proj.id);
+      const finalProjects: Project[] = (projectsData || []).map((proj) => {
+        const matched = permissionsData.find((p) => p.project_id === proj.id);
+        const rounds = (roundsData || []).filter((r) => r.project_id === proj.id);
         return { ...proj, role: matched?.role || '', rounds };
       });
 
@@ -160,8 +192,10 @@ setIsAdmin(profile.role === 'admin');
           >
             <div className="flex items-center justify-between gap-2">
               <div className="flex items-center gap-3">
-                <span className="text-lg font-bold text-indigo-800">{project.title}</span>
-                {project.status === "active" && (
+                <span className="text-lg font-bold text-indigo-800">
+                  {project.title}
+                </span>
+                {project.status === 'active' && (
                   <span className="inline-flex items-center gap-1 px-2 py-1 rounded text-xs bg-green-50 text-green-700 font-semibold">
                     <svg
                       className="w-4 h-4"
@@ -170,7 +204,11 @@ setIsAdmin(profile.role === 'admin');
                       strokeWidth={3}
                       viewBox="0 0 24 24"
                     >
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        d="M5 13l4 4L19 7"
+                      />
                     </svg>
                   </span>
                 )}
@@ -184,10 +222,16 @@ setIsAdmin(profile.role === 'admin');
                   strokeWidth={2}
                   viewBox="0 0 24 24"
                 >
-                  <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2" />
+                  <circle
+                    cx="12"
+                    cy="12"
+                    r="10"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                  />
                   <circle cx="12" cy="12" r="3" fill="currentColor" />
                 </svg>
-                {translateRole(project.role ?? "?")}
+                {translateRole(project.role ?? '?')}
               </span>
             </div>
 
@@ -197,35 +241,68 @@ setIsAdmin(profile.role === 'admin');
               {project.rounds && project.rounds.length > 0 ? (
                 project.rounds.map((round) => {
                   // Chỉ các role này mới được xem kết quả
-                  const canViewStats = ["secretary", "viewer", "admin"].includes(project.role ?? "");
+                  const canViewStats = ['secretary', 'viewer', 'admin'].includes(
+                    project.role ?? ''
+                  );
+                  // NEW: kiểm tra vòng này đã nộp chưa
+                  const isSubmitted = submittedRoundIds.has(round.id);
+
                   return (
                     <div
                       key={round.id}
                       className="flex items-center justify-between bg-gray-50 rounded-lg p-3 mb-2"
                     >
-                      <div className="flex items-center gap-2">
-                        <span className="font-medium">Vòng {round.round_number}</span>
-                        {round.status === "active" && (
-                          <span className="inline-flex items-center gap-1 text-green-700 ml-1 text-sm">
-                            <svg
-                              className="w-4 h-4"
-                              fill="none"
-                              stroke="currentColor"
-                              strokeWidth={3}
-                              viewBox="0 0 24 24"
-                            >
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                            </svg>
-                            Đang hoạt động
+                      <div className="flex flex-col gap-1">
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium">
+                            Vòng {round.round_number}
                           </span>
-                        )}
+                          {round.status === 'active' && (
+                            <span className="inline-flex items-center gap-1 text-green-700 ml-1 text-sm">
+                              <svg
+                                className="w-4 h-4"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth={3}
+                                viewBox="0 0 24 24"
+                              >
+                                <path
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                  d="M5 13l4 4L19 7"
+                                />
+                              </svg>
+                              Đang hoạt động
+                            </span>
+                          )}
+                        </div>
+                        {/* NEW: trạng thái đã nộp / chưa nộp */}
+                        <div className="text-sm">
+                          {isSubmitted ? (
+                            <span className="inline-flex items-center gap-1 text-emerald-700">
+                              <span>✅</span>
+                              <span>Bạn đã nộp bản cuối</span>
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 text-orange-600">
+                              <span>⚠️</span>
+                              <span>Bạn chưa nộp bản cuối</span>
+                            </span>
+                          )}
+                        </div>
                       </div>
+
                       <div className="flex gap-2">
                         <a
                           href={`/survey/${round.id}`}
-                          className="px-4 py-1 bg-green-700 hover:bg-green-800 text-white rounded-lg font-semibold shadow transition"
+                          className={
+                            'px-4 py-1 rounded-lg font-semibold shadow transition ' +
+                            (isSubmitted
+                              ? 'bg-gray-300 text-gray-700 hover:bg-gray-300 cursor-pointer'
+                              : 'bg-green-700 hover:bg-green-800 text-white')
+                          }
                         >
-                          Vào trả lời
+                          {isSubmitted ? 'Đã nộp' : 'Vào trả lời'}
                         </a>
                         {canViewStats ? (
                           <Link
@@ -248,19 +325,22 @@ setIsAdmin(profile.role === 'admin');
                   );
                 })
               ) : (
-                <div className="text-gray-400 italic text-sm">Chưa có vòng khảo sát nào</div>
+                <div className="text-gray-400 italic text-sm">
+                  Chưa có vòng khảo sát nào
+                </div>
               )}
             </div>
+
             {/* Nút Kết quả dự án, chỉ cho admin và viewer */}
-{["admin", "viewer"].includes(project.role ?? "") && (
-  <Link
-    href={`/stats/project/${project.id}`}
-    className="inline-block mt-2 px-4 py-1 bg-purple-700 hover:bg-purple-800 text-white rounded-lg font-semibold shadow transition"
-    style={{ alignSelf: "flex-end" }}
-  >
-    📊 Kết quả dự án
-  </Link>
-)}
+            {['admin', 'viewer'].includes(project.role ?? '') && (
+              <Link
+                href={`/stats/project/${project.id}`}
+                className="inline-block mt-2 px-4 py-1 bg-purple-700 hover:bg-purple-800 text-white rounded-lg font-semibold shadow transition"
+                style={{ alignSelf: 'flex-end' }}
+              >
+                📊 Kết quả dự án
+              </Link>
+            )}
           </div>
         ))}
       </div>
