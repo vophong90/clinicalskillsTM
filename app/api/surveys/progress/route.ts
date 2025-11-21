@@ -21,7 +21,7 @@ export async function GET(req: NextRequest) {
     let q = s
       .from('round_participants')
       .select('round_id, user_id, created_at')
-      .range(from, from + PAGE_SIZE - 1); // phân trang
+      .range(from, from + PAGE_SIZE - 1);
 
     if (roundId) q = q.eq('round_id', roundId);
 
@@ -34,14 +34,12 @@ export async function GET(req: NextRequest) {
 
     participants.push(...data);
 
-    // nếu trả về ít hơn PAGE_SIZE thì đã hết dữ liệu
     if (data.length < PAGE_SIZE) break;
-
     from += PAGE_SIZE;
   }
 
-  // Nếu không có participant nào thì trả luôn cho nhanh
   if (!participants.length) {
+    // Không có ai trong round_participants
     return NextResponse.json({ items: [] });
   }
 
@@ -62,7 +60,6 @@ export async function GET(req: NextRequest) {
     participants = participants.filter((p) => okRounds.has(p.round_id));
   }
 
-  // Sau khi lọc project, tính lại roundIds để dùng cho các query tiếp theo
   const roundIds = Array.from(new Set(participants.map((x) => x.round_id)));
 
   if (!roundIds.length) {
@@ -74,7 +71,7 @@ export async function GET(req: NextRequest) {
   // 2) Map thông tin rounds, projects, profiles
   // =========================
 
-  // Rounds
+  // Rounds của các round_id liên quan
   const { data: rounds2, error: eR2 } = await s
     .from('rounds')
     .select('id, project_id, round_number')
@@ -84,31 +81,32 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: eR2.message }, { status: 500 });
   }
 
-  // Projects
+  // Toàn bộ projects (số lượng thường ít)
   const { data: projects, error: ePrj } = await s.from('projects').select('id, title');
-
   if (ePrj) {
     return NextResponse.json({ error: ePrj.message }, { status: 500 });
   }
 
-  // Profiles – chỉ lấy đúng những user_id có trong participants, chia lô để tránh limit 1000
-  const userIdsAll = Array.from(new Set(participants.map((p) => p.user_id)));
-  const PROFILE_PAGE = 1000;
+  // Profiles – load toàn bộ theo phân trang, tránh limit 1000
   let allProfiles: { id: string; email: string | null; name: string | null }[] = [];
+  let fromProf = 0;
 
-  for (let i = 0; i < userIdsAll.length; i += PROFILE_PAGE) {
-    const chunk = userIdsAll.slice(i, i + PROFILE_PAGE);
-    if (!chunk.length) continue;
-
+  while (true) {
     const { data, error } = await s
       .from('profiles')
       .select('id, email, name')
-      .in('id', chunk);
+      .range(fromProf, fromProf + PAGE_SIZE - 1);
 
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
+
+    if (!data || data.length === 0) break;
+
     allProfiles = allProfiles.concat((data as any[]) || []);
+    if (data.length < PAGE_SIZE) break;
+
+    fromProf += PAGE_SIZE;
   }
 
   const rmap = new Map((rounds2 || []).map((r) => [r.id, r] as const));
@@ -127,7 +125,7 @@ export async function GET(req: NextRequest) {
       .select('user_id, round_id, updated_at')
       .eq('is_submitted', true)
       .in('round_id', roundIds)
-      .range(fromResp, fromResp + PAGE_SIZE - 1); // phân trang
+      .range(fromResp, fromResp + PAGE_SIZE - 1);
 
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 });
@@ -138,7 +136,6 @@ export async function GET(req: NextRequest) {
     subs.push(...data);
 
     if (data.length < PAGE_SIZE) break;
-
     fromResp += PAGE_SIZE;
   }
 
