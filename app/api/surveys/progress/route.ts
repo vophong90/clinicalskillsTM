@@ -71,37 +71,47 @@ export async function GET(req: NextRequest) {
   }
 
   // =========================
-  // 2) Map thông tin rounds, projects, profiles (bảng nhỏ, giữ nguyên 1 query)
-  // =========================
-  const { data: rounds2, error: eR2 } = await s
-    .from('rounds')
-    .select('id, project_id, round_number')
-    .in('id', roundIds);
+// 2) Map thông tin rounds, projects, profiles
+// =========================
+const { data: rounds2, error: eR2 } = await s
+  .from('rounds')
+  .select('id, project_id, round_number')
+  .in('id', roundIds);
 
-  if (eR2) {
-    return NextResponse.json({ error: eR2.message }, { status: 500 });
-  }
+if (eR2) {
+  return NextResponse.json({ error: eR2.message }, { status: 500 });
+}
 
-  const { data: projects, error: ePrj } = await s
-    .from('projects')
-    .select('id, title');
+const { data: projects, error: ePrj } = await s
+  .from('projects')
+  .select('id, title');
 
-  if (ePrj) {
-    return NextResponse.json({ error: ePrj.message }, { status: 500 });
-  }
+if (ePrj) {
+  return NextResponse.json({ error: ePrj.message }, { status: 500 });
+}
 
-  const { data: profiles, error: eProf } = await s
+// 👉 LẤY CHỈ CÁC PROFILE CẦN THIẾT, THEO TỪNG LÔ
+const userIdsAll = Array.from(new Set(participants.map(p => p.user_id)));
+const PROFILE_PAGE = 1000;
+let allProfiles: { id: string; email: string | null; name: string | null }[] = [];
+
+for (let i = 0; i < userIdsAll.length; i += PROFILE_PAGE) {
+  const chunk = userIdsAll.slice(i, i + PROFILE_PAGE);
+  const { data, error } = await s
     .from('profiles')
-    .select('id, email, name');
+    .select('id, email, name')
+    .in('id', chunk);
 
-  if (eProf) {
-    return NextResponse.json({ error: eProf.message }, { status: 500 });
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
   }
+  allProfiles = allProfiles.concat(data || []);
+}
 
-  const rmap = new Map((rounds2 || []).map(r => [r.id, r] as const));
-  const pmap = new Map((projects || []).map(p => [p.id, p] as const));
-  const umap = new Map((profiles || []).map(u => [u.id, u] as const));
-
+const rmap = new Map((rounds2 || []).map(r => [r.id, r] as const));
+const pmap = new Map((projects || []).map(p => [p.id, p] as const));
+const umap = new Map((allProfiles || []).map(u => [u.id, u] as const));
+ 
   // =========================
   // 3) Lấy TẤT CẢ responses is_submitted=true bằng phân trang
   // =========================
