@@ -164,6 +164,22 @@ export default function Dashboard() {
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col items-center py-12">
+      {/* Thanh góc phải: Tài khoản + Đăng xuất */}
+      <div className="absolute top-6 right-6 flex items-center gap-2">
+        <Link
+          href="/account"
+          className="px-3 py-1 rounded bg-gray-100 hover:bg-gray-200 text-gray-800 text-sm font-semibold shadow"
+        >
+          👤 Tài khoản của tôi
+        </Link>
+        <button
+          onClick={handleLogout}
+          className="px-4 py-1 rounded bg-gray-200 hover:bg-gray-300 text-gray-600 text-sm font-semibold"
+        >
+          Đăng xuất
+        </button>
+      </div>
+
       {/* Tên người dùng */}
       <div className="text-3xl font-bold text-indigo-900 mb-2">{name}</div>
 
@@ -176,13 +192,6 @@ export default function Dashboard() {
           🔧 Vào trang quản trị
         </Link>
       )}
-
-      <button
-        onClick={handleLogout}
-        className="absolute top-6 right-6 px-4 py-1 rounded bg-gray-200 hover:bg-gray-300 text-gray-600 text-sm font-semibold"
-      >
-        Đăng xuất
-      </button>
 
       <div className="w-full max-w-2xl space-y-8 mt-4">
         {projects.map((project) => (
