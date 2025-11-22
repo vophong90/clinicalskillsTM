@@ -1,4 +1,5 @@
 'use client';
+
 import { useState } from 'react';
 
 import AdminUserManager from './AdminUserManager';
@@ -6,9 +7,12 @@ import AdminProjectManager from './AdminProjectManager';
 import AdminRoundManager from './AdminRoundManager';
 import AdminItemManager from './AdminItemManager';
 import AdminSurveyInviteManager from './AdminSurveyInviteManager';
+import AdminRewardResourceManager from './AdminRewardResourceManager';
 
 export default function AdminPage() {
-  const [tab, setTab] = useState<'users' | 'projects' | 'rounds' | 'items' | 'invites'>('users');
+  const [tab, setTab] = useState<
+    'users' | 'projects' | 'rounds' | 'items' | 'invites' | 'rewards'
+  >('users');
 
   return (
     <div className="flex min-h-screen">
@@ -19,7 +23,9 @@ export default function AdminPage() {
             <li>
               <button
                 className={`block w-full text-left px-3 py-2 rounded ${
-                  tab === 'users' ? 'bg-blue-600 text-white font-bold' : 'hover:bg-blue-100'
+                  tab === 'users'
+                    ? 'bg-blue-600 text-white font-bold'
+                    : 'hover:bg-blue-100'
                 }`}
                 onClick={() => setTab('users')}
               >
@@ -29,7 +35,9 @@ export default function AdminPage() {
             <li>
               <button
                 className={`block w-full text-left px-3 py-2 rounded ${
-                  tab === 'projects' ? 'bg-blue-600 text-white font-bold' : 'hover:bg-blue-100'
+                  tab === 'projects'
+                    ? 'bg-blue-600 text-white font-bold'
+                    : 'hover:bg-blue-100'
                 }`}
                 onClick={() => setTab('projects')}
               >
@@ -39,7 +47,9 @@ export default function AdminPage() {
             <li>
               <button
                 className={`block w-full text-left px-3 py-2 rounded ${
-                  tab === 'rounds' ? 'bg-blue-600 text-white font-bold' : 'hover:bg-blue-100'
+                  tab === 'rounds'
+                    ? 'bg-blue-600 text-white font-bold'
+                    : 'hover:bg-blue-100'
                 }`}
                 onClick={() => setTab('rounds')}
               >
@@ -49,7 +59,9 @@ export default function AdminPage() {
             <li>
               <button
                 className={`block w-full text-left px-3 py-2 rounded ${
-                  tab === 'items' ? 'bg-blue-600 text-white font-bold' : 'hover:bg-blue-100'
+                  tab === 'items'
+                    ? 'bg-blue-600 text-white font-bold'
+                    : 'hover:bg-blue-100'
                 }`}
                 onClick={() => setTab('items')}
               >
@@ -59,11 +71,25 @@ export default function AdminPage() {
             <li>
               <button
                 className={`block w-full text-left px-3 py-2 rounded ${
-                  tab === 'invites' ? 'bg-blue-600 text-white font-bold' : 'hover:bg-blue-100'
+                  tab === 'invites'
+                    ? 'bg-blue-600 text-white font-bold'
+                    : 'hover:bg-blue-100'
                 }`}
                 onClick={() => setTab('invites')}
               >
                 ✉️ Mời khảo sát
+              </button>
+            </li>
+            <li>
+              <button
+                className={`block w-full text-left px-3 py-2 rounded ${
+                  tab === 'rewards'
+                    ? 'bg-blue-600 text-white font-bold'
+                    : 'hover:bg-blue-100'
+                }`}
+                onClick={() => setTab('rewards')}
+              >
+                🎁 Tài nguyên thưởng
               </button>
             </li>
           </ul>
@@ -77,6 +103,7 @@ export default function AdminPage() {
         {tab === 'rounds' && <AdminRoundManager />}
         {tab === 'items' && <AdminItemManager />}
         {tab === 'invites' && <AdminSurveyInviteManager />}
+        {tab === 'rewards' && <AdminRewardResourceManager />}
       </main>
     </div>
   );
