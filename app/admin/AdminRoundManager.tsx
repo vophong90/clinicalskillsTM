@@ -52,7 +52,7 @@ export default function AdminRoundManager() {
   }
 
   return (
-    <div className="max-w-3xl mx-auto py-8">
+    <div className="w-full mx-auto py-8">
       <h2 className="text-xl font-bold mb-4">🔄 Quản lý Round</h2>
       {message && <div className="mb-3 text-green-600">{message}</div>}
       <form className="mb-4 flex flex-col gap-2">
