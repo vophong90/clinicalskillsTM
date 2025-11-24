@@ -450,8 +450,8 @@ export default function AdminResultAnalysisManager() {
           </div>
         ) : (
           <>
-            <div className="border rounded overflow-auto max-h-[600px]">
-              <table className="min-w-[900px] text-sm">
+            <div className="border rounded w-full max-w-full overflow-x-auto overflow-y-auto max-h-[600px]">
+              <table className="text-sm border-collapse min-w-max">
                 <thead className="bg-gray-100 sticky top-0 z-10">
                   <tr>
                     <th className="border px-2 py-1 text-left">Project</th>
@@ -463,7 +463,7 @@ export default function AdminResultAnalysisManager() {
                     {allOptionLabels.map((label) => (
                       <th
                         key={label}
-                        className="border px-2 py-1 text-center whitespace-nowrap"
+                        className="border px-2 py-1 text-center whitespace-nowrap w-24"
                       >
                         {label}
                       </th>
@@ -506,7 +506,7 @@ export default function AdminResultAnalysisManager() {
                             )}
                           </div>
                         </td>
-                        <td className="border px-2 py-1 text-center align-top">
+                        <td className="border px-2 py-1 text-center align-top w-16">
                           {row.N}
                         </td>
                         {allOptionLabels.map((label) => {
@@ -518,7 +518,7 @@ export default function AdminResultAnalysisManager() {
                           const isNonEssentialCell =
                             label.toLowerCase().includes('không thiết yếu');
 
-                          let cellClass = 'border px-2 py-1 text-center align-top';
+                          let cellClass = 'border px-2 py-1 text-center align-top w-24';
 
                           // tô đỏ ô nếu dưới cut-off đồng thuận (và không phải cột Không thiết yếu)
                           if (
