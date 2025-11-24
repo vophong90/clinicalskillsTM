@@ -68,8 +68,8 @@ function extractOptionLabels(options_json: any): string[] {
   if (!obj) return [];
 
   // dạng {choices: [...]}
-  if (Array.isArray(obj.choices)) {
-    return obj.choices.map((x: any) => String(x));
+  if (Array.isArray((obj as any).choices)) {
+    return (obj as any).choices.map((x: any) => String(x));
   }
 
   // fallback: nếu bản thân là array
@@ -85,8 +85,8 @@ function extractAnswerChoices(answer_json: any): string[] {
   const obj = safeParseJSON(answer_json) ?? answer_json;
   if (!obj) return [];
 
-  if (Array.isArray(obj.choices)) {
-    return obj.choices.map((x: any) => String(x));
+  if (Array.isArray((obj as any).choices)) {
+    return (obj as any).choices.map((x: any) => String(x));
   }
 
   if (Array.isArray(obj)) {
@@ -117,13 +117,15 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // có thể dùng nhưng thực ra không cần cho việc tính toán, FE tự tô đỏ
+  // cắt ngưỡng
   const cutOffConsensus = typeof body.cut_off === 'number' ? body.cut_off : 70;
   const cutOffNonEssential =
-    typeof body.cut_off_nonessential === 'number' ? body.cut_off_nonessential : 30;
+    typeof body.cut_off_nonessential === 'number'
+      ? body.cut_off_nonessential
+      : 30;
 
   try {
-    // 1. Lấy rounds
+    // 1. Lấy rounds (số vòng truyền vào đã giới hạn bởi round_ids, không lo 1000)
     const { data: rounds, error: roundsErr } = await s
       .from('rounds')
       .select('id, project_id, round_number')
@@ -144,7 +146,7 @@ export async function POST(req: NextRequest) {
       projectIds.add(r.project_id);
     }
 
-    // 2. Lấy projects
+    // 2. Lấy projects (cũng chỉ theo projectIds, không lo 1000)
     const { data: projects, error: projErr } = await s
       .from('projects')
       .select('id, title')
@@ -159,28 +161,58 @@ export async function POST(req: NextRequest) {
       projectMap.set(p.id, p);
     });
 
-    // 3. Lấy items cho các round đã chọn
-    const { data: items, error: itemsErr } = await s
-      .from('items')
-      .select('id, round_id, project_id, prompt, options_json, item_order')
-      .in('round_id', round_ids);
+    // 3. Lấy items cho các round đã chọn – có phân trang
+    const PAGE_ITEMS = 1000;
+    let allItems: DBItem[] = [];
+    let fromItems = 0;
 
-    if (itemsErr) {
-      throw new Error('Lỗi truy vấn items: ' + itemsErr.message);
+    while (true) {
+      const { data, error } = await s
+        .from('items')
+        .select('id, round_id, project_id, prompt, options_json, item_order')
+        .in('round_id', round_ids)
+        .range(fromItems, fromItems + PAGE_ITEMS - 1);
+
+      if (error) {
+        throw new Error('Lỗi truy vấn items: ' + error.message);
+      }
+
+      if (!data || data.length === 0) break;
+
+      allItems = allItems.concat(data as unknown as DBItem[]);
+
+      if (data.length < PAGE_ITEMS) break;
+      fromItems += PAGE_ITEMS;
     }
 
-    // 4. Lấy responses (chỉ của bản đã nộp cuối)
-    const { data: responses, error: respErr } = await s
-      .from('responses')
-      .select('round_id, item_id, user_id, answer_json, is_submitted')
-      .in('round_id', round_ids)
-      .eq('is_submitted', true);
+    // 4. Lấy responses (chỉ bản đã nộp cuối) – có phân trang
+    const PAGE_RESP = 1000;
+    let allResponses: DBResponse[] = [];
+    let fromResp = 0;
 
-    if (respErr) {
-      throw new Error('Lỗi truy vấn responses: ' + respErr.message);
+    while (true) {
+      const { data, error } = await s
+        .from('responses')
+        .select('round_id, item_id, user_id, answer_json, is_submitted')
+        .in('round_id', round_ids)
+        .eq('is_submitted', true)
+        .range(fromResp, fromResp + PAGE_RESP - 1);
+
+      if (error) {
+        throw new Error('Lỗi truy vấn responses: ' + error.message);
+      }
+
+      if (!data || data.length === 0) break;
+
+      allResponses = allResponses.concat(
+        data as unknown as DBResponse[]
+      );
+
+      if (data.length < PAGE_RESP) break;
+      fromResp += PAGE_RESP;
     }
 
-    const respList = (responses || []) as DBResponse[];
+    const respList = allResponses;
 
     // 5. Map: round_id → set user_id (để tính N theo vòng)
     const roundParticipants = new Map<string, Set<string>>();
@@ -208,8 +240,9 @@ export async function POST(req: NextRequest) {
     // 7. Tính toán cho từng item
     const rows: AnalysisRow[] = [];
 
-    for (const item of (items || []) as DBItem[]) {
+    for (const item of allItems) {
       if (!item.round_id) continue;
+
       const round = roundMap.get(item.round_id);
       if (!round) continue;
 
@@ -219,7 +252,7 @@ export async function POST(req: NextRequest) {
       const participants = roundParticipants.get(item.round_id);
       const N = participants ? participants.size : 0;
       if (N === 0) {
-        // không ai tham gia vòng này → skip hoặc vẫn thêm với N=0 và % = 0
+        // không ai tham gia vòng này → bỏ qua
         continue;
       }
 
@@ -234,20 +267,20 @@ export async function POST(req: NextRequest) {
 
       // Đếm số người chọn từng option
       const counts = new Map<string, number>();
-        for (const label of optionLabels) {
+      for (const label of optionLabels) {
         counts.set(label, 0);
-        }
+      }
 
-        for (const r of respForItem) {
-    const choices = extractAnswerChoices(r.answer_json);
-    const uniqChoices = new Set(choices);
+      for (const r of respForItem) {
+        const choices = extractAnswerChoices(r.answer_json);
+        const uniqChoices = new Set(choices);
 
-    uniqChoices.forEach((label) => {
-      if (!counts.has(label)) return;
-      counts.set(label, (counts.get(label) || 0) + 1);
-      });
-    }
-      
+        uniqChoices.forEach((label) => {
+          if (!counts.has(label)) return;
+          counts.set(label, (counts.get(label) || 0) + 1);
+        });
+      }
+
       // Tính % cho từng option
       const options: AnalysisOption[] = optionLabels.map((label) => {
         const c = counts.get(label) || 0;
@@ -284,7 +317,7 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // 8. Sort cho đẹp: theo project_title → round_number → item_order → prompt
+    // 8. Sort: project_title → round_number → full_prompt
     rows.sort((a, b) => {
       if (a.project_title !== b.project_title) {
         return a.project_title.localeCompare(b.project_title);
@@ -294,7 +327,6 @@ export async function POST(req: NextRequest) {
       if (ra && rb && ra.round_number !== rb.round_number) {
         return ra.round_number - rb.round_number;
       }
-      // item_order không có trong AnalysisRow, nên thôi sort theo full_prompt
       return a.full_prompt.localeCompare(b.full_prompt);
     });
 
