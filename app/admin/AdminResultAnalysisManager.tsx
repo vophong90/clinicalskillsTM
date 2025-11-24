@@ -65,13 +65,12 @@ export default function AdminResultAnalysisManager() {
   // lưu các câu đang được "mở rộng" câu hỏi đầy đủ
   const [expandedItemIds, setExpandedItemIds] = useState<Set<string>>(new Set());
 
-  // load dự án + vòng cho admin (giống cách anh làm ở manager khác)
+  // load dự án + vòng cho admin
   useEffect(() => {
     const loadProjects = async () => {
       setLoading(true);
       setError(null);
 
-      // Giả định admin được phép xem tất cả project, nếu anh dùng RLS khác thì có thể cần RPC riêng
       const { data: projectsData, error: projErr } = await supabase
         .from('projects')
         .select('id, title, status');
@@ -117,6 +116,26 @@ export default function AdminResultAnalysisManager() {
 
     loadProjects();
   }, []);
+
+  // bộ lọc Project: nếu chọn 1 project cụ thể thì giữ lại selection giao với project đó
+  const handleProjectFilterChange = (value: string) => {
+    const newFilter: 'all' | string = value === 'all' ? 'all' : value;
+    setProjectFilter(newFilter);
+
+    if (newFilter !== 'all') {
+      const proj = projects.find((p) => p.id === newFilter);
+      if (!proj) return;
+      const projRoundIds = proj.rounds.map((r) => r.id);
+      setSelectedRoundIds((prev) => {
+        const next = new Set<string>();
+        projRoundIds.forEach((id) => {
+          if (prev.has(id)) next.add(id);
+        });
+        return next;
+      });
+    }
+    // nếu chọn "Tất cả project" thì giữ nguyên selection (cho phép phân tích đa project)
+  };
 
   // danh sách project sau khi áp bộ lọc
   const filteredProjects = useMemo(() => {
@@ -204,6 +223,7 @@ export default function AdminResultAnalysisManager() {
   const handleRunAnalysis = async () => {
     setError(null);
 
+    // phân tích TẤT CẢ vòng đang được tick
     const roundIdsToAnalyze = Array.from(selectedRoundIds);
     if (roundIdsToAnalyze.length === 0) {
       setError('Vui lòng chọn ít nhất 1 vòng để phân tích.');
@@ -214,7 +234,6 @@ export default function AdminResultAnalysisManager() {
     setCurrentPage(1);
 
     try {
-      // NOTE: Anh chỉnh URL / body cho đúng với API thực tế
       const res = await fetch('/api/admin/analysis', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -254,7 +273,7 @@ export default function AdminResultAnalysisManager() {
       <h1 className="text-xl font-bold mb-2">📊 Phân tích kết quả</h1>
 
       {/* Bộ lọc */}
-      <section className="border rounded-lg p-4 space-y-3 bg-gray-50">
+      <section className="border rounded-lg p-4 space-y-3 bg-gray-50 overflow-hidden">
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
           <div>
             <label className="block text-sm font-semibold mb-1">
@@ -263,11 +282,7 @@ export default function AdminResultAnalysisManager() {
             <select
               className="w-full border rounded px-2 py-1 text-sm"
               value={projectFilter}
-              onChange={(e) =>
-                setProjectFilter(
-                  e.target.value === 'all' ? 'all' : e.target.value
-                )
-              }
+              onChange={(e) => handleProjectFilterChange(e.target.value)}
             >
               <option value="all">Tất cả project</option>
               {projects.map((p) => (
@@ -306,11 +321,15 @@ export default function AdminResultAnalysisManager() {
           </div>
         </div>
 
-        {loading && <div className="text-sm text-gray-500">Đang tải project & vòng...</div>}
+        {loading && (
+          <div className="text-sm text-gray-500">
+            Đang tải project & vòng...
+          </div>
+        )}
       </section>
 
       {/* Bảng tick chọn project & vòng */}
-      <section className="border rounded-lg p-4 bg-white">
+      <section className="border rounded-lg p-4 bg-white overflow-hidden">
         <h2 className="font-semibold mb-2">Chọn vòng đưa vào phân tích</h2>
         {filteredProjects.length === 0 ? (
           <div className="text-sm text-gray-500 italic">
@@ -383,7 +402,7 @@ export default function AdminResultAnalysisManager() {
       </section>
 
       {/* Cut-off & nút phân tích */}
-      <section className="border rounded-lg p-4 bg-gray-50 flex flex-col md:flex-row gap-3 md:items-end md:justify-between">
+      <section className="border rounded-lg p-4 bg-gray-50 flex flex-col md:flex-row gap-3 md:items-end md:justify-between overflow-hidden">
         <div className="flex flex-wrap gap-4">
           <div>
             <label className="block text-sm font-semibold mb-1">
@@ -432,7 +451,7 @@ export default function AdminResultAnalysisManager() {
       </section>
 
       {/* Bảng kết quả */}
-      <section className="border rounded-lg p-4 bg-white">
+      <section className="border rounded-lg p-4 bg-white overflow-hidden">
         <div className="flex items-center justify-between mb-2">
           <h2 className="font-semibold">
             Kết quả phân tích ({analysisRows.length} câu hỏi)
@@ -459,7 +478,9 @@ export default function AdminResultAnalysisManager() {
                     <th className="border px-2 py-1 text-left w-[280px]">
                       Câu hỏi
                     </th>
-                    <th className="border px-2 py-1 text-center">N</th>
+                    <th className="border px-2 py-1 text-center w-16">
+                      N
+                    </th>
                     {allOptionLabels.map((label) => (
                       <th
                         key={label}
@@ -475,9 +496,7 @@ export default function AdminResultAnalysisManager() {
                     const isRowHighNonEssential =
                       (row.nonEssentialPercent ?? 0) >= cutOffNonEssential;
 
-                    const rowClass = isRowHighNonEssential
-                      ? 'bg-red-50'
-                      : '';
+                    const rowClass = isRowHighNonEssential ? 'bg-red-50' : '';
 
                     const isExpanded = expandedItemIds.has(row.item_id);
                     const displayText = isExpanded
@@ -485,7 +504,10 @@ export default function AdminResultAnalysisManager() {
                       : truncatePrompt(row.full_prompt, 6);
 
                     return (
-                      <tr key={row.round_id + '-' + row.item_id} className={rowClass}>
+                      <tr
+                        key={row.round_id + '-' + row.item_id}
+                        className={rowClass}
+                      >
                         <td className="border px-2 py-1 align-top">
                           {row.project_title}
                         </td>
@@ -518,7 +540,8 @@ export default function AdminResultAnalysisManager() {
                           const isNonEssentialCell =
                             label.toLowerCase().includes('không thiết yếu');
 
-                          let cellClass = 'border px-2 py-1 text-center align-top w-24';
+                          let cellClass =
+                            'border px-2 py-1 text-center align-top whitespace-nowrap w-24';
 
                           // tô đỏ ô nếu dưới cut-off đồng thuận (và không phải cột Không thiết yếu)
                           if (
