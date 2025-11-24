@@ -121,7 +121,32 @@ export default function AdminResultAnalysisManager() {
   const handleProjectFilterChange = (value: string) => {
   const newFilter: 'all' | string = value === 'all' ? 'all' : value;
   setProjectFilter(newFilter);
-  // Không động tới selectedRoundIds nữa
+
+  if (newFilter === 'all') {
+    // chế độ xem tất cả – không đụng đến selectedRoundIds
+    return;
+  }
+
+  setSelectedRoundIds((prev) => {
+    const proj = projects.find((p) => p.id === newFilter);
+    if (!proj) return prev;
+
+    const projRoundIds = proj.rounds.map((r) => r.id);
+    const projSet = new Set(projRoundIds);
+
+    // lấy giao giữa selection cũ và các vòng thuộc project này
+    const next = new Set<string>();
+    prev.forEach((id) => {
+      if (projSet.has(id)) next.add(id);
+    });
+
+    // nếu chưa tick vòng nào của project này thì mặc định tick tất cả vòng
+    if (next.size === 0) {
+      projRoundIds.forEach((id) => next.add(id));
+    }
+
+    return next;
+  });
 };
 
   // danh sách project sau khi áp bộ lọc
@@ -256,7 +281,7 @@ export default function AdminResultAnalysisManager() {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 max-w-full overflow-x-hidden"> 
       <h1 className="text-xl font-bold mb-2">📊 Phân tích kết quả</h1>
 
       {/* Bộ lọc */}
@@ -457,7 +482,7 @@ export default function AdminResultAnalysisManager() {
         ) : (
           <>
             <div className="border rounded w-full max-w-full overflow-x-auto overflow-y-auto max-h-[600px]">
-              <table className="text-sm border-collapse min-w-max">
+              <table className="text-sm border-collapse w-full">
                 <thead className="bg-gray-100 sticky top-0 z-10">
                   <tr>
                     <th className="border px-2 py-1 text-left">Project</th>
