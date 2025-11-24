@@ -119,23 +119,10 @@ export default function AdminResultAnalysisManager() {
 
   // bộ lọc Project: nếu chọn 1 project cụ thể thì giữ lại selection giao với project đó
   const handleProjectFilterChange = (value: string) => {
-    const newFilter: 'all' | string = value === 'all' ? 'all' : value;
-    setProjectFilter(newFilter);
-
-    if (newFilter !== 'all') {
-      const proj = projects.find((p) => p.id === newFilter);
-      if (!proj) return;
-      const projRoundIds = proj.rounds.map((r) => r.id);
-      setSelectedRoundIds((prev) => {
-        const next = new Set<string>();
-        projRoundIds.forEach((id) => {
-          if (prev.has(id)) next.add(id);
-        });
-        return next;
-      });
-    }
-    // nếu chọn "Tất cả project" thì giữ nguyên selection (cho phép phân tích đa project)
-  };
+  const newFilter: 'all' | string = value === 'all' ? 'all' : value;
+  setProjectFilter(newFilter);
+  // Không động tới selectedRoundIds nữa
+};
 
   // danh sách project sau khi áp bộ lọc
   const filteredProjects = useMemo(() => {
