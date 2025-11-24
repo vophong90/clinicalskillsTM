@@ -42,6 +42,40 @@ function truncatePrompt(text: string, maxWords = 6): string {
   return words.slice(0, maxWords).join(' ') + '…';
 }
 
+// Helper: build CSV từ kết quả phân tích
+function buildAnalysisCsv(rows: AnalysisRow[], allOptionLabels: string[]): string {
+  const escape = (val: any) => {
+    const s = String(val ?? '');
+    // Escape dấu " bên trong
+    return `"${s.replace(/"/g, '""')}"`;
+  };
+
+  // Header
+  const header = ['Project', 'Vòng', 'Câu hỏi', 'N', ...allOptionLabels];
+  const lines: string[] = [header.map(escape).join(',')];
+
+  // Data
+  for (const row of rows) {
+    const baseCols = [
+      row.project_title,
+      row.round_label,
+      row.full_prompt,
+      row.N,
+    ];
+
+    const optionCols = allOptionLabels.map((label) => {
+      const opt = row.options.find((o) => o.option_label === label);
+      // giữ dạng số (x.y), không thêm dấu %
+      return opt ? opt.percent.toFixed(1) : '';
+    });
+
+    const line = [...baseCols, ...optionCols].map(escape).join(',');
+    lines.push(line);
+  }
+
+  return lines.join('\r\n');
+}
+
 export default function AdminResultAnalysisManager() {
   const [loading, setLoading] = useState(false);
   const [loadingAnalysis, setLoadingAnalysis] = useState(false);
@@ -280,6 +314,38 @@ export default function AdminResultAnalysisManager() {
     }
   };
 
+    const handleExportExcel = () => {
+    if (!analysisRows.length) {
+      setError('Không có dữ liệu để xuất.');
+      return;
+    }
+
+    try {
+      const csv = buildAnalysisCsv(analysisRows, allOptionLabels);
+
+      // Thêm BOM để Excel đọc đúng tiếng Việt
+      const blob = new Blob(['\uFEFF' + csv], {
+        type: 'text/csv;charset=utf-8;',
+      });
+
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download =
+        'phan_tich_ket_qua_' +
+        new Date().toISOString().slice(0, 10) +
+        '.csv';
+
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      console.error(e);
+      setError('Lỗi khi xuất Excel.');
+    }
+  };
+
   return (
     <div className="space-y-6 max-w-full overflow-x-hidden"> 
       <h1 className="text-xl font-bold mb-2">📊 Phân tích kết quả</h1>
@@ -462,15 +528,24 @@ export default function AdminResultAnalysisManager() {
         </div>
       </section>
 
-      {/* Bảng kết quả */}
+           {/* Bảng kết quả */}
       <section className="border rounded-lg p-4 bg-white overflow-hidden">
         <div className="flex items-center justify-between mb-2">
           <h2 className="font-semibold">
             Kết quả phân tích ({analysisRows.length} câu hỏi)
           </h2>
           {analysisRows.length > 0 && (
-            <div className="text-sm text-gray-500">
-              Trang {currentPage}/{totalPages} · {PAGE_SIZE} câu/trang
+            <div className="flex items-center gap-3 text-sm text-gray-500">
+              <span>
+                Trang {currentPage}/{totalPages} · {PAGE_SIZE} câu/trang
+              </span>
+              <button
+                type="button"
+                onClick={handleExportExcel}
+                className="px-3 py-1 border rounded bg-green-600 text-white hover:bg-green-700"
+              >
+                ⬇️ Xuất Excel
+              </button>
             </div>
           )}
         </div>
