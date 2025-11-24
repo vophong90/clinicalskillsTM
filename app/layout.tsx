@@ -1,3 +1,4 @@
+// app/layout.tsx
 import type { Metadata } from "next";
 import "./globals.css";
 
@@ -15,13 +16,22 @@ export const metadata: Metadata = {
   },
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
   return (
     <html lang="vi">
-      <body style={{ fontFamily: 'system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial' }}>
-        <div style={{ maxWidth: 980, margin: "0 auto", padding: 16 }}>
-          {children}
-        </div>
+      <body
+        style={{
+          fontFamily:
+            "system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial",
+        }}
+        className="bg-gray-50"
+      >
+        {/* BỎ maxWidth 980, để từng page tự quyết định layout */}
+        {children}
       </body>
     </html>
   );
