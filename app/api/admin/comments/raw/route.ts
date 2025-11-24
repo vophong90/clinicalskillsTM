@@ -53,20 +53,22 @@ function safeParseJSON(val: any): any {
   return null;
 }
 
-// Ưu tiên các field thường gặp: comment / text / freeText / answer
+// Ưu tiên các field thường gặp: comment / text / freeText / answer / value
 function extractComment(answer_json: any): string | null {
   const obj = safeParseJSON(answer_json) ?? answer_json;
   if (!obj) return null;
 
   if (typeof obj === 'string') {
-    return obj.trim() || null;
+    const s = obj.trim();
+    return s || null;
   }
 
   if (typeof obj === 'object') {
     const candidates = ['comment', 'text', 'freeText', 'answer', 'value'];
     for (const key of candidates) {
-      if (typeof (obj as any)[key] === 'string') {
-        const s = (obj as any)[key].trim();
+      const v = (obj as any)[key];
+      if (typeof v === 'string') {
+        const s = v.trim();
         if (s) return s;
       }
     }
@@ -88,7 +90,9 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const round_id = typeof body.round_id === 'string' ? body.round_id : null;
+  const round_id: string | null =
+    typeof body.round_id === 'string' ? body.round_id : null;
+
   if (!round_id) {
     return NextResponse.json(
       { error: 'round_id là bắt buộc' },
@@ -140,26 +144,47 @@ export async function POST(req: NextRequest) {
     }
 
     const itemMap = new Map<string, DBItem>();
-    (itemsData || []).forEach((it) => {
+    (itemsData || []).forEach((it: any) => {
       itemMap.set(it.id, it as DBItem);
     });
 
-    // 4. Lấy responses (chỉ bản đã nộp)
-    // Nếu sợ >1000 có thể phân trang sau, nhưng 1 vòng thường không quá lớn
-    const { data: respData, error: respErr } = await s
-      .from('responses')
-      .select('round_id, item_id, user_id, answer_json, is_submitted')
-      .eq('round_id', round_id)
-      .eq('is_submitted', true);
+    // 4. Lấy responses (chỉ bản đã nộp) với PHÂN TRANG để tránh limit 1000
+    const PAGE = 1000;
+    let from = 0;
+    const allResponses: DBResponse[] = [];
 
-    if (respErr) {
-      throw new Error('Lỗi truy vấn responses: ' + respErr.message);
+    while (true) {
+      const { data, error } = await s
+        .from('responses')
+        .select('round_id, item_id, user_id, answer_json, is_submitted')
+        .eq('round_id', round_id)
+        .eq('is_submitted', true)
+        .range(from, from + PAGE - 1);
+
+      if (error) {
+        throw new Error('Lỗi truy vấn responses: ' + error.message);
+      }
+
+      const batch = (data || []) as DBResponse[];
+
+      if (batch.length === 0) {
+        break;
+      }
+
+      allResponses.push(...batch);
+
+      if (batch.length < PAGE) {
+        // batch cuối cùng
+        break;
+      }
+
+      from += PAGE;
     }
 
     const comments: CommentRow[] = [];
 
-    (respData || []).forEach((r) => {
-      const c = extractComment((r as DBResponse).answer_json);
+    allResponses.forEach((r) => {
+      const c = extractComment(r.answer_json);
       if (!c) return;
 
       const item = itemMap.get(r.item_id);
@@ -185,7 +210,7 @@ export async function POST(req: NextRequest) {
       return (a.user_id || '').localeCompare(b.user_id || '');
     });
 
-    return NextResponse.json({ comments });
+    return NextResponse.json({ comments, total_responses: allResponses.length });
   } catch (e: any) {
     console.error('Error in /api/admin/comments/raw:', e);
     return NextResponse.json(
