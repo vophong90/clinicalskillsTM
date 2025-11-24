@@ -232,22 +232,22 @@ export async function POST(req: NextRequest) {
       const key = `${item.round_id}:${item.id}`;
       const respForItem = itemRespMap.get(key) || [];
 
-      // Đếm số người chọn từng option (multi-select)
+      // Đếm số người chọn từng option
       const counts = new Map<string, number>();
-      for (const label of optionLabels) {
+        for (const label of optionLabels) {
         counts.set(label, 0);
-      }
-
-      for (const r of respForItem) {
-        const choices = extractAnswerChoices(r.answer_json);
-        const uniqChoices = new Set(choices); // tránh nhân đôi nếu JSON lặp
-
-        for (const label of uniqChoices) {
-          if (!counts.has(label)) continue; // chỉ quan tâm đến option nằm trong choices chuẩn
-          counts.set(label, (counts.get(label) || 0) + 1);
         }
-      }
 
+        for (const r of respForItem) {
+    const choices = extractAnswerChoices(r.answer_json);
+    const uniqChoices = new Set(choices);
+
+    uniqChoices.forEach((label) => {
+      if (!counts.has(label)) return;
+      counts.set(label, (counts.get(label) || 0) + 1);
+      });
+    }
+      
       // Tính % cho từng option
       const options: AnalysisOption[] = optionLabels.map((label) => {
         const c = counts.get(label) || 0;
