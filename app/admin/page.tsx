@@ -9,10 +9,11 @@ import AdminItemManager from './AdminItemManager';
 import AdminSurveyInviteManager from './AdminSurveyInviteManager';
 import AdminRewardResourceManager from './AdminRewardResourceManager';
 import AdminPasswordManager from './AdminPasswordManager';
+import AdminResultAnalysisManager from './AdminResultAnalysisManager';
 
 export default function AdminPage() {
   const [tab, setTab] = useState<
-    'users' | 'projects' | 'rounds' | 'items' | 'invites' | 'rewards' | 'passwords'
+    'users' | 'projects' | 'rounds' | 'items' | 'invites' | 'rewards' | 'passwords'| 'analysis'
   >('users');
 
   return (
@@ -105,6 +106,18 @@ export default function AdminPage() {
                 🔒 Quản lý mật khẩu
               </button>
             </li>
+            <li>
+              <button
+                className={`block w-full text-left px-3 py-2 rounded ${
+                  tab === 'analysis'
+                    ? 'bg-blue-600 text-white font-bold'
+                    : 'hover:bg-blue-100'
+                }`}
+                onClick={() => setTab('analysis')}
+              >
+                📊 Phân tích kết quả
+              </button>
+            </li>
           </ul>
         </nav>
       </aside>
@@ -118,6 +131,7 @@ export default function AdminPage() {
         {tab === 'invites' && <AdminSurveyInviteManager />}
         {tab === 'rewards' && <AdminRewardResourceManager />}
         {tab === 'passwords' && <AdminPasswordManager />}
+        {tab === 'analysis' && <AdminResultAnalysisManager />}
       </main>
     </div>
   );
