@@ -204,9 +204,7 @@ export default function AdminResultAnalysisManager() {
   const handleRunAnalysis = async () => {
     setError(null);
 
-    const roundIdsToAnalyze = Array.from(selectedRoundIds).filter((id) =>
-      allVisibleRoundIds.includes(id)
-    );
+    const roundIdsToAnalyze = Array.from(selectedRoundIds);
     if (roundIdsToAnalyze.length === 0) {
       setError('Vui lòng chọn ít nhất 1 vòng để phân tích.');
       return;
