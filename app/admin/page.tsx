@@ -10,10 +10,11 @@ import AdminSurveyInviteManager from './AdminSurveyInviteManager';
 import AdminRewardResourceManager from './AdminRewardResourceManager';
 import AdminPasswordManager from './AdminPasswordManager';
 import AdminResultAnalysisManager from './AdminResultAnalysisManager';
+import AdminCommentSummaryManager from './AdminCommentSummaryManager';
 
 export default function AdminPage() {
   const [tab, setTab] = useState<
-    'users' | 'projects' | 'rounds' | 'items' | 'invites' | 'rewards' | 'passwords'| 'analysis'
+    'users' | 'projects' | 'rounds' | 'items' | 'invites' | 'rewards' | 'passwords'| 'analysis'| 'comments'
   >('users');
 
   return (
@@ -118,6 +119,20 @@ export default function AdminPage() {
                 📊 Phân tích kết quả
               </button>
             </li>
+
+            {/* Nút mới: Tổng hợp ý kiến */}
+            <li>
+              <button
+                className={`block w-full text-left px-3 py-2 rounded ${
+                  tab === 'comments'
+                    ? 'bg-blue-600 text-white font-bold'
+                    : 'hover:bg-blue-100'
+                }`}
+                onClick={() => setTab('comments')}
+              >
+                💬 Tổng hợp ý kiến
+              </button>
+            </li>
           </ul>
         </nav>
       </aside>
@@ -132,6 +147,7 @@ export default function AdminPage() {
         {tab === 'rewards' && <AdminRewardResourceManager />}
         {tab === 'passwords' && <AdminPasswordManager />}
         {tab === 'analysis' && <AdminResultAnalysisManager />}
+        {tab === 'comments' && <AdminCommentSummaryManager />}
       </main>
     </div>
   );
