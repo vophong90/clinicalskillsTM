@@ -481,110 +481,88 @@ export default function AdminResultAnalysisManager() {
           </div>
         ) : (
           <>
-            <div className="border rounded w-full max-w-full overflow-x-auto overflow-y-auto max-h-[600px]">
-              <table className="text-sm border-collapse w-full">
-                <thead className="bg-gray-100 sticky top-0 z-10">
-                  <tr>
-                    <th className="border px-2 py-1 text-left">Project</th>
-                    <th className="border px-2 py-1 text-left">Vòng</th>
-                    <th className="border px-2 py-1 text-left w-[280px]">
-                      Câu hỏi
-                    </th>
-                    <th className="border px-2 py-1 text-center w-16">
-                      N
-                    </th>
-                    {allOptionLabels.map((label) => (
-                      <th
-                        key={label}
-                        className="border px-2 py-1 text-center whitespace-nowrap w-24"
-                      >
-                        {label}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {paginatedRows.map((row) => {
-                    const isRowHighNonEssential =
-                      (row.nonEssentialPercent ?? 0) >= cutOffNonEssential;
+            <div className="border rounded overflow-x-auto overflow-y-auto max-h-[600px]">
+  <table className="text-sm border-collapse min-w-max">
+    <thead className="bg-gray-100 sticky top-0 z-10">
+      <tr>
+        <th className="border px-2 py-1 text-left">Project</th>
+        <th className="border px-2 py-1 text-left">Vòng</th>
+        <th className="border px-2 py-1 text-left w-[280px]">
+          Câu hỏi
+        </th>
+        <th className="border px-2 py-1 text-center w-16">N</th>
+        {allOptionLabels.map((label) => (
+          <th key={label} className="border px-2 py-1 text-center whitespace-nowrap w-24">
+            {label}
+          </th>
+        ))}
+      </tr>
+    </thead>
 
-                    const rowClass = isRowHighNonEssential ? 'bg-red-50' : '';
+    <tbody>
+      {paginatedRows.map((row) => {
+        const isRowHighNonEssential =
+          (row.nonEssentialPercent ?? 0) >= cutOffNonEssential;
 
-                    const isExpanded = expandedItemIds.has(row.item_id);
-                    const displayText = isExpanded
-                      ? row.full_prompt
-                      : truncatePrompt(row.full_prompt, 6);
+        const rowClass = isRowHighNonEssential ? 'bg-red-50' : '';
+        const isExpanded = expandedItemIds.has(row.item_id);
+        const displayText = isExpanded
+          ? row.full_prompt
+          : truncatePrompt(row.full_prompt, 6);
 
-                    return (
-                      <tr
-                        key={row.round_id + '-' + row.item_id}
-                        className={rowClass}
-                      >
-                        <td className="border px-2 py-1 align-top">
-                          {row.project_title}
-                        </td>
-                        <td className="border px-2 py-1 align-top">
-                          {row.round_label}
-                        </td>
-                        <td className="border px-2 py-1 align-top">
-                          <div className="flex flex-col gap-1">
-                            <span>{displayText}</span>
-                            {row.full_prompt !== displayText && (
-                              <button
-                                type="button"
-                                className="text-xs text-blue-600 underline self-start"
-                                onClick={() => toggleExpandItem(row.item_id)}
-                              >
-                                {isExpanded ? 'Thu gọn' : 'Xem đầy đủ'}
-                              </button>
-                            )}
-                          </div>
-                        </td>
-                        <td className="border px-2 py-1 text-center align-top w-16">
-                          {row.N}
-                        </td>
-                        {allOptionLabels.map((label) => {
-                          const opt = row.options.find(
-                            (o) => o.option_label === label
-                          );
-                          const val = opt ? opt.percent : null;
+        return (
+          <tr key={row.round_id + '-' + row.item_id} className={rowClass}>
+            <td className="border px-2 py-1 align-top">{row.project_title}</td>
+            <td className="border px-2 py-1 align-top">{row.round_label}</td>
 
-                          const isNonEssentialCell =
-                            label.toLowerCase().includes('không thiết yếu');
+            <td className="border px-2 py-1 align-top break-words">
+              <div className="flex flex-col gap-1">
+                <span>{displayText}</span>
+                {row.full_prompt !== displayText && (
+                  <button
+                    type="button"
+                    className="text-xs text-blue-600 underline self-start"
+                    onClick={() => toggleExpandItem(row.item_id)}
+                  >
+                    {isExpanded ? 'Thu gọn' : 'Xem đầy đủ'}
+                  </button>
+                )}
+              </div>
+            </td>
 
-                          let cellClass =
-                            'border px-2 py-1 text-center align-top whitespace-nowrap w-24';
+            <td className="border px-2 py-1 text-center align-top w-16">
+              {row.N}
+            </td>
 
-                          // tô đỏ ô nếu dưới cut-off đồng thuận (và không phải cột Không thiết yếu)
-                          if (
-                            val !== null &&
-                            val < cutOffConsensus &&
-                            !isNonEssentialCell
-                          ) {
-                            cellClass += ' bg-red-100';
-                          }
+            {allOptionLabels.map((label) => {
+              const opt = row.options.find((o) => o.option_label === label);
+              const val = opt ? opt.percent : null;
 
-                          // nếu cột "Không thiết yếu" và hàng này vượt ngưỡng, cho đỏ đậm hơn
-                          if (
-                            isNonEssentialCell &&
-                            isRowHighNonEssential &&
-                            val !== null
-                          ) {
-                            cellClass += ' bg-red-200 font-semibold';
-                          }
+              const isNonEssentialCell = label.toLowerCase().includes('không thiết yếu');
 
-                          return (
-                            <td key={label} className={cellClass}>
-                              {val !== null ? `${val.toFixed(1)}%` : '-'}
-                            </td>
-                          );
-                        })}
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
+              let cellClass =
+                'border px-2 py-1 text-center align-top whitespace-nowrap w-24';
+
+              if (val !== null && val < cutOffConsensus && !isNonEssentialCell) {
+                cellClass += ' bg-red-100';
+              }
+
+              if (isNonEssentialCell && isRowHighNonEssential && val !== null) {
+                cellClass += ' bg-red-200 font-semibold';
+              }
+
+              return (
+                <td key={label} className={cellClass}>
+                  {val !== null ? `${val.toFixed(1)}%` : '-'}
+                </td>
+              );
+            })}
+          </tr>
+        );
+      })}
+    </tbody>
+  </table>
+</div>
 
             {/* phân trang */}
             <div className="flex items-center justify-between mt-3 text-sm">
