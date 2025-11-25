@@ -3,6 +3,9 @@
 import { useState, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
+// Ngăn Next cố prerender static trang này
+export const dynamic = "force-dynamic";
+
 export default function UpdatePasswordPage() {
   const [password, setPassword] = useState("");
   const [pwd2, setPwd2] = useState("");
@@ -12,7 +15,9 @@ export default function UpdatePasswordPage() {
 
   const router = useRouter();
   const searchParams = useSearchParams();
-  const token = searchParams.get("token");
+
+  // useSearchParams có thể là null trong lúc prerender → phải check trước
+  const token = searchParams ? searchParams.get("token") : null;
 
   useEffect(() => {
     if (!token) {
@@ -73,7 +78,8 @@ export default function UpdatePasswordPage() {
 
         {tokenMissing && (
           <div className="text-red-600 text-sm">
-            Liên kết đặt lại mật khẩu không hợp lệ hoặc đã hết hạn. Vui lòng yêu cầu gửi lại email đặt mật khẩu.
+            Liên kết đặt lại mật khẩu không hợp lệ hoặc đã hết hạn. Vui lòng yêu
+            cầu gửi lại email đặt mật khẩu.
           </div>
         )}
 
@@ -82,7 +88,7 @@ export default function UpdatePasswordPage() {
           className="w-full border rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-green-400 bg-gray-50"
           placeholder="Mật khẩu mới"
           value={password}
-          onChange={e => setPassword(e.target.value)}
+          onChange={(e) => setPassword(e.target.value)}
           required
           disabled={tokenMissing}
         />
@@ -91,7 +97,7 @@ export default function UpdatePasswordPage() {
           className="w-full border rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-green-400 bg-gray-50"
           placeholder="Nhập lại mật khẩu mới"
           value={pwd2}
-          onChange={e => setPwd2(e.target.value)}
+          onChange={(e) => setPwd2(e.target.value)}
           required
           disabled={tokenMissing}
         />
