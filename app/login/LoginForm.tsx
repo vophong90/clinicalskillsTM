@@ -24,26 +24,36 @@ export default function LoginForm() {
     setLoading(false);
   }
 
+  // ✅ Dùng API mới /api/auth/request-reset (Resend), KHÔNG gọi Supabase resetPasswordForEmail nữa
   async function handleSendResetLink() {
     setMsg("");
     if (!email) {
       setMsg("❌ Vui lòng nhập email trước khi yêu cầu đặt lại mật khẩu.");
       return;
     }
-    setLoading(true);
-    const redirectTo =
-      typeof window !== "undefined"
-      ? `${window.location.origin}/auth/update-password`
-      : undefined;
 
-    const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo, // trang bạn sẽ tạo ở bước B
+    setLoading(true);
+    try {
+      const res = await fetch("/api/auth/request-reset", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email }),
       });
 
-    if (error) setMsg("❌ " + error.message);
-    else setMsg("✅ Đã gửi email đặt lại mật khẩu. Vui lòng kiểm tra hộp thư.");
-
-    setLoading(false);
+      // Không tiết lộ email có tồn tại hay không – message luôn giống nhau
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok && data?.error) {
+        // Nếu backend trả error rõ ràng thì vẫn hiện ra cho bạn debug
+        setMsg("❌ " + data.error);
+      } else {
+        setMsg("✅ Nếu email tồn tại trong hệ thống, liên kết đặt lại mật khẩu đã được gửi. Vui lòng kiểm tra hộp thư.");
+      }
+    } catch (err) {
+      console.error(err);
+      setMsg("❌ Có lỗi kết nối, vui lòng thử lại.");
+    } finally {
+      setLoading(false);
+    }
   }
 
   return (
@@ -58,8 +68,13 @@ export default function LoginForm() {
             style={{ maxWidth: 80, maxHeight: 80 }}
           />
           {/* Title */}
-          <h1 className="text-2xl font-extrabold text-green-700 text-center">Clinical Skills Delphi</h1>
-          <div className="text-base text-gray-500 text-center">Đăng nhập để tham gia khảo sát</div>
+          <h1 className="text-2xl font-extrabold text-green-700 text-center">
+            Clinical Skills Delphi
+          </h1>
+          <div className="text-base text-gray-500 text-center">
+            Đăng nhập để tham gia khảo sát
+          </div>
+
           {/* FORM */}
           <form onSubmit={handleLogin} className="w-full flex flex-col gap-y-5 mt-2">
             <div>
@@ -68,7 +83,7 @@ export default function LoginForm() {
                 className="w-full border rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-green-400 bg-gray-50"
                 type="email"
                 value={email}
-                onChange={e => setEmail(e.target.value)}
+                onChange={(e) => setEmail(e.target.value)}
                 placeholder="Nhập email của bạn"
                 required
                 autoFocus
@@ -80,7 +95,7 @@ export default function LoginForm() {
                 className="w-full border rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-green-400 bg-gray-50"
                 type="password"
                 value={password}
-                onChange={e => setPassword(e.target.value)}
+                onChange={(e) => setPassword(e.target.value)}
                 placeholder="Nhập mật khẩu"
                 required
               />
@@ -92,22 +107,27 @@ export default function LoginForm() {
             >
               {loading ? "Đang đăng nhập..." : "Đăng nhập"}
             </button>
-            
+
             <button
               type="button"
               onClick={handleSendResetLink}
               disabled={loading || !email}
               className="text-sm text-green-700 underline mt-1 disabled:opacity-60"
-              >
+            >
               Gửi liên kết đặt lại mật khẩu
             </button>
-
           </form>
+
           <div className="text-center text-sm text-gray-500 pt-2">
-            Quên mật khẩu? <span className="underline">Liên hệ thư ký hội đồng</span>
+            Quên mật khẩu? <span className="underline">Nhập email và bấm &quot;Gửi liên kết đặt lại mật khẩu&quot;</span>
           </div>
+
           {msg && (
-            <div className={`text-center text-base ${msg.startsWith("✅") ? "text-green-600" : "text-red-600"} pt-2`}>
+            <div
+              className={`text-center text-base ${
+                msg.startsWith("✅") ? "text-green-600" : "text-red-600"
+              } pt-2`}
+            >
               {msg}
             </div>
           )}
