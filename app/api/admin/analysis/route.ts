@@ -44,7 +44,7 @@ type AnalysisRow = {
   round_label: string;
   item_id: string;
   full_prompt: string;
-  N: number;
+  N: number; // N của item (số người trả lời item này trong vòng đó)
   options: AnalysisOption[];
   nonEssentialPercent: number;
 };
@@ -204,9 +204,7 @@ export async function POST(req: NextRequest) {
 
       if (!data || data.length === 0) break;
 
-      allResponses = allResponses.concat(
-        data as unknown as DBResponse[]
-      );
+      allResponses = allResponses.concat(data as unknown as DBResponse[]);
 
       if (data.length < PAGE_RESP) break;
       fromResp += PAGE_RESP;
@@ -214,18 +212,7 @@ export async function POST(req: NextRequest) {
 
     const respList = allResponses;
 
-    // 5. Map: round_id → set user_id (để tính N theo vòng)
-    const roundParticipants = new Map<string, Set<string>>();
-    for (const r of respList) {
-      let set = roundParticipants.get(r.round_id);
-      if (!set) {
-        set = new Set<string>();
-        roundParticipants.set(r.round_id, set);
-      }
-      set.add(r.user_id);
-    }
-
-    // 6. Group responses theo (round_id, item_id)
+    // 5. Group responses theo (round_id, item_id)
     const itemRespMap = new Map<string, DBResponse[]>();
     for (const r of respList) {
       const key = `${r.round_id}:${r.item_id}`;
@@ -237,7 +224,7 @@ export async function POST(req: NextRequest) {
       arr.push(r);
     }
 
-    // 7. Tính toán cho từng item
+    // 6. Tính toán cho từng item (N = số người trả lời item đó trong vòng)
     const rows: AnalysisRow[] = [];
 
     for (const item of allItems) {
@@ -249,13 +236,6 @@ export async function POST(req: NextRequest) {
       const project = projectMap.get(round.project_id);
       if (!project) continue;
 
-      const participants = roundParticipants.get(item.round_id);
-      const N = participants ? participants.size : 0;
-      if (N === 0) {
-        // không ai tham gia vòng này → bỏ qua
-        continue;
-      }
-
       const optionLabels = extractOptionLabels(item.options_json);
       if (!optionLabels.length) {
         // câu này không có danh sách option chuẩn → bỏ qua
@@ -264,6 +244,17 @@ export async function POST(req: NextRequest) {
 
       const key = `${item.round_id}:${item.id}`;
       const respForItem = itemRespMap.get(key) || [];
+
+      // N = số người thực sự trả lời item này (distinct user_id)
+      const participantIds = new Set<string>();
+      for (const r of respForItem) {
+        participantIds.add(r.user_id);
+      }
+      const N = participantIds.size;
+      if (N === 0) {
+        // không ai trả lời item này → bỏ qua
+        continue;
+      }
 
       // Đếm số người chọn từng option
       const counts = new Map<string, number>();
@@ -281,7 +272,7 @@ export async function POST(req: NextRequest) {
         });
       }
 
-      // Tính % cho từng option
+      // Tính % cho từng option, chia cho N của item trong vòng đó
       const options: AnalysisOption[] = optionLabels.map((label) => {
         const c = counts.get(label) || 0;
         const percent = N > 0 ? (c / N) * 100 : 0;
@@ -317,7 +308,7 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // 8. Sort: project_title → round_number → full_prompt
+    // 7. Sort: project_title → round_number → full_prompt
     rows.sort((a, b) => {
       if (a.project_title !== b.project_title) {
         return a.project_title.localeCompare(b.project_title);
