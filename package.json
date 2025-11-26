@@ -17,7 +17,8 @@
     "xlsx": "^0.18.5",
     "recharts": "^2.7.2",
     "uuid": "^9.0.0",
-    "resend": "^3.2.0"
+    "resend": "^3.2.0",
+    "openai": "^4.67.0"
   },
   "devDependencies": {
     "typescript": "^5.5.4",
