@@ -1,3 +1,4 @@
+// app/account/page.tsx
 'use client';
 
 import { useEffect, useState } from 'react';
@@ -146,7 +147,7 @@ export default function AccountPage() {
     setProfileMsg('');
 
     try {
-      // 1. Cập nhật email trong Supabase Auth (nếu đổi)
+      // cập nhật email trong Auth nếu đổi
       const {
         data: { user },
         error: getUserErr,
@@ -159,11 +160,10 @@ export default function AccountPage() {
         if (authErr) {
           console.error(authErr);
           setProfileMsg('Cập nhật email đăng nhập không thành công.');
-          // vẫn tiếp tục cập nhật profile bên dưới
+          // vẫn tiếp tục update profile
         }
       }
 
-      // 2. Cập nhật bảng profiles
       const { error: profErr } = await supabase
         .from('profiles')
         .update({
@@ -179,7 +179,6 @@ export default function AccountPage() {
         console.error(profErr);
         setProfileMsg('Cập nhật thông tin hồ sơ không thành công.');
       } else {
-        // cập nhật state local
         setEmail(values.email);
         setName(values.name);
         setPhone(values.phone);
@@ -194,11 +193,11 @@ export default function AccountPage() {
 
   if (loading) {
     return (
-      <main className="min-h-screen">
-        <div className="max-w-5xl mx-auto px-4 py-8">
+      <div className="flex min-h-screen">
+        <main className="flex-1 p-8 bg-white">
           <p className="text-sm text-gray-600">Đang tải thông tin tài khoản…</p>
-        </div>
-      </main>
+        </main>
+      </div>
     );
   }
 
@@ -211,104 +210,116 @@ export default function AccountPage() {
   };
 
   return (
-    <main className="min-h-screen">
-      <div className="max-w-5xl mx-auto px-4 py-8 space-y-6">
-        <header className="flex items-center justify-between gap-3">
-          <div>
-            <h1 className="text-2xl font-bold text-gray-900">
-              Tài khoản của tôi
-            </h1>
-            <p className="text-sm text-gray-600">
-              Quản lý thông tin cá nhân, điểm thưởng, tài nguyên và trợ lý GPT nội bộ.
+    <div className="flex min-h-screen">
+      {/* Không có sidebar ở trang account, chỉ main giống admin */}
+      <main className="flex-1 p-8 bg-white">
+        <div className="max-w-5xl mx-auto space-y-6">
+          {/* Header giống style trang admin: icon + title */}
+          <header className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <div className="h-10 w-10 rounded-full bg-blue-50 flex items-center justify-center text-xl">
+                👤
+              </div>
+              <div>
+                <h1 className="text-2xl font-bold text-gray-900">
+                  Tài khoản của tôi
+                </h1>
+                <p className="text-sm text-gray-600">
+                  Quản lý thông tin cá nhân, điểm thưởng, tài nguyên và trợ lý GPT
+                  nội bộ.
+                </p>
+              </div>
+            </div>
+          </header>
+
+          {/* Card tổng điểm – giống 1 section trên admin */}
+          <section className="bg-white border rounded-xl shadow-sm p-4 flex items-center justify-between gap-3">
+            <div>
+              <p className="text-sm text-gray-700">Tổng điểm thưởng</p>
+              <p className="text-2xl font-bold text-blue-700">
+                {totalPoints} điểm
+              </p>
+            </div>
+            <p className="text-xs text-gray-500 max-w-xs">
+              Bạn được cộng <strong>+20 điểm</strong> cho mỗi khảo sát hoàn thành
+              (is_submitted).
             </p>
-          </div>
-        </header>
+          </section>
 
-        {/* Card tổng điểm – theo kiểu card trắng giống admin main */}
-        <section className="bg-white border rounded-xl shadow-sm p-4 flex items-center justify-between gap-3">
-          <div>
-            <p className="text-sm text-gray-700">Tổng điểm thưởng</p>
-            <p className="text-2xl font-bold text-blue-700">
-              {totalPoints} điểm
+          {profileMsg && (
+            <p className="text-sm text-emerald-700" role="status">
+              {profileMsg}
             </p>
-          </div>
-          <p className="text-xs text-gray-500 max-w-xs">
-            Bạn được cộng <strong>+20 điểm</strong> cho mỗi khảo sát hoàn thành (is_submitted).
-          </p>
-        </section>
+          )}
 
-        {profileMsg && (
-          <p className="text-sm text-emerald-700" role="status">
-            {profileMsg}
-          </p>
-        )}
+          {/* Card chính chứa Tabs + nội dung */}
+          <div className="bg-white border rounded-xl shadow-sm">
+            {/* Tabs header giống kiểu admin section header */}
+            <div className="border-b border-gray-200 px-4 pt-3">
+              <nav className="-mb-px flex gap-4 text-sm">
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('info')}
+                  className={
+                    'px-3 py-2 border-b-2 ' +
+                    (activeTab === 'info'
+                      ? 'border-blue-600 text-blue-700 font-semibold'
+                      : 'border-transparent text-gray-600 hover:text-gray-800')
+                  }
+                >
+                  Thông tin chung
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('resources')}
+                  className={
+                    'px-3 py-2 border-b-2 ' +
+                    (activeTab === 'resources'
+                      ? 'border-blue-600 text-blue-700 font-semibold'
+                      : 'border-transparent text-gray-600 hover:text-gray-800')
+                  }
+                >
+                  Tài nguyên
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('gpt')}
+                  className={
+                    'px-3 py-2 border-b-2 ' +
+                    (activeTab === 'gpt'
+                      ? 'border-blue-600 text-blue-700 font-semibold'
+                      : 'border-transparent text-gray-600 hover:text-gray-800')
+                  }
+                >
+                  Trợ lý GPT
+                </button>
+              </nav>
+            </div>
 
-        {/* Tabs – vẫn kiểu border-b, nhưng đặt trong container chung */}
-        <div className="bg-white border rounded-xl shadow-sm">
-          <div className="border-b border-gray-200 px-4 pt-3">
-            <nav className="-mb-px flex gap-4 text-sm">
-              <button
-                type="button"
-                onClick={() => setActiveTab('info')}
-                className={
-                  'px-3 py-2 border-b-2 ' +
-                  (activeTab === 'info'
-                    ? 'border-blue-600 text-blue-700 font-semibold'
-                    : 'border-transparent text-gray-600 hover:text-gray-800')
-                }
-              >
-                Thông tin chung
-              </button>
-              <button
-                type="button"
-                onClick={() => setActiveTab('resources')}
-                className={
-                  'px-3 py-2 border-b-2 ' +
-                  (activeTab === 'resources'
-                    ? 'border-blue-600 text-blue-700 font-semibold'
-                    : 'border-transparent text-gray-600 hover:text-gray-800')
-                }
-              >
-                Tài nguyên
-              </button>
-              <button
-                type="button"
-                onClick={() => setActiveTab('gpt')}
-                className={
-                  'px-3 py-2 border-b-2 ' +
-                  (activeTab === 'gpt'
-                    ? 'border-blue-600 text-blue-700 font-semibold'
-                    : 'border-transparent text-gray-600 hover:text-gray-800')
-                }
-              >
-                Trợ lý GPT
-              </button>
-            </nav>
-          </div>
+            {/* Nội dung từng tab – padding giống các khối admin */}
+            <div className="p-4">
+              {activeTab === 'info' && (
+                <AccountInfoTab
+                  initialValues={profileValues}
+                  role={role}
+                  saving={savingProfile}
+                  onSave={handleSaveProfile}
+                />
+              )}
 
-          {/* Nội dung từng tab trong cùng card trắng */}
-          <div className="p-4">
-            {activeTab === 'info' && (
-              <AccountInfoTab
-                initialValues={profileValues}
-                role={role}
-                saving={savingProfile}
-                onSave={handleSaveProfile}
-              />
-            )}
+              {activeTab === 'resources' && (
+                <AccountResourcesTab
+                  totalPoints={totalPoints}
+                  resources={resources}
+                  logs={logs}
+                />
+              )}
 
-            {activeTab === 'resources' && (
-              <AccountResourcesTab
-                totalPoints={totalPoints}
-                resources={resources}
-                logs={logs}
-              />
-            )}
-
-            {activeTab === 'gpt' && <AccountGptTab role={role} />}
+              {activeTab === 'gpt' && <AccountGptTab role={role} />}
+            </div>
           </div>
         </div>
-      </div>
-    </main>
+      </main>
+    </div>
   );
 }
