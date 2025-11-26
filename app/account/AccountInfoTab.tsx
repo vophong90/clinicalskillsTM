@@ -44,79 +44,89 @@ export default function AccountInfoTab({
   }
 
   return (
-    <section className="bg-white border rounded-xl p-4 space-y-4">
-      <h2 className="text-lg font-semibold mb-1">Thông tin tài khoản</h2>
-      <p className="text-xs text-gray-500 mb-2">
-        Vui lòng cập nhật đầy đủ để Hội đồng có thể liên hệ và ghi nhận đóng góp
-        của bạn.
-      </p>
+    <section className="space-y-4">
+      <div>
+        <h2 className="text-lg font-semibold text-gray-900 mb-1">
+          Thông tin tài khoản
+        </h2>
+        <p className="text-xs text-gray-500">
+          Cập nhật thông tin liên hệ để Hội đồng dễ dàng trao đổi và ghi nhận
+          đóng góp của bạn.
+        </p>
+      </div>
 
-      <form onSubmit={handleSubmit} className="space-y-3 max-w-xl">
-        <div>
-          <label className="block text-sm font-medium mb-1">Họ và tên</label>
-          <input
-            type="text"
-            className="w-full border rounded-md px-3 py-2 text-sm"
-            value={form.name}
-            onChange={(e) => handleChange('name', e.target.value)}
-            placeholder="Nguyễn Văn A"
-          />
-        </div>
+      <form onSubmit={handleSubmit} className="space-y-4 max-w-xl">
+        <div className="grid gap-3">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Họ và tên
+            </label>
+            <input
+              type="text"
+              className="w-full border rounded-md px-3 py-2 text-sm bg-white"
+              value={form.name}
+              onChange={(e) => handleChange('name', e.target.value)}
+              placeholder="Nguyễn Văn A"
+            />
+          </div>
 
-        <div>
-          <label className="block text-sm font-medium mb-1">
-            Email đăng nhập
-          </label>
-          <input
-            type="email"
-            className="w-full border rounded-md px-3 py-2 text-sm"
-            value={form.email}
-            onChange={(e) => handleChange('email', e.target.value)}
-            placeholder="email@domain.com"
-          />
-          <p className="text-xs text-gray-500 mt-1">
-            Email này dùng để nhận link khảo sát và đăng nhập hệ thống. Nếu bạn
-            đổi email, có thể cần xác minh lại.
-          </p>
-        </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Email đăng nhập
+            </label>
+            <input
+              type="email"
+              className="w-full border rounded-md px-3 py-2 text-sm bg-white"
+              value={form.email}
+              onChange={(e) => handleChange('email', e.target.value)}
+              placeholder="email@domain.com"
+            />
+            <p className="text-xs text-gray-500 mt-1">
+              Email này dùng để nhận link khảo sát và đăng nhập hệ thống.
+              Nếu bạn đổi email, có thể cần xác minh lại.
+            </p>
+          </div>
 
-        <div>
-          <label className="block text-sm font-medium mb-1">
-            Số điện thoại
-          </label>
-          <input
-            type="tel"
-            className="w-full border rounded-md px-3 py-2 text-sm"
-            value={form.phone}
-            onChange={(e) => handleChange('phone', e.target.value)}
-            placeholder="Ví dụ: 0903 xxx xxx"
-          />
-        </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Số điện thoại
+              </label>
+              <input
+                type="tel"
+                className="w-full border rounded-md px-3 py-2 text-sm bg-white"
+                value={form.phone}
+                onChange={(e) => handleChange('phone', e.target.value)}
+                placeholder="Ví dụ: 0903 xxx xxx"
+              />
+            </div>
 
-        <div>
-          <label className="block text-sm font-medium mb-1">
-            Nơi công tác
-          </label>
-          <input
-            type="text"
-            className="w-full border rounded-md px-3 py-2 text-sm"
-            value={form.workplace}
-            onChange={(e) => handleChange('workplace', e.target.value)}
-            placeholder="Bệnh viện / Trường / Đơn vị công tác"
-          />
-        </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Chuyên ngành đang công tác
+              </label>
+              <input
+                type="text"
+                className="w-full border rounded-md px-3 py-2 text-sm bg-white"
+                value={form.specialty}
+                onChange={(e) => handleChange('specialty', e.target.value)}
+                placeholder="Ví dụ: Nội khoa, YHCT Cơ–Xương–Khớp..."
+              />
+            </div>
+          </div>
 
-        <div>
-          <label className="block text-sm font-medium mb-1">
-            Chuyên ngành đang công tác
-          </label>
-          <input
-            type="text"
-            className="w-full border rounded-md px-3 py-2 text-sm"
-            value={form.specialty}
-            onChange={(e) => handleChange('specialty', e.target.value)}
-            placeholder="Ví dụ: Nội khoa, YHCT Cơ – Xương – Khớp..."
-          />
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Nơi công tác
+            </label>
+            <input
+              type="text"
+              className="w-full border rounded-md px-3 py-2 text-sm bg-white"
+              value={form.workplace}
+              onChange={(e) => handleChange('workplace', e.target.value)}
+              placeholder="Bệnh viện / Trường / Đơn vị công tác"
+            />
+          </div>
         </div>
 
         {role && (
@@ -126,7 +136,7 @@ export default function AccountInfoTab({
           </p>
         )}
 
-        <div className="pt-2">
+        <div className="pt-1">
           <button
             type="submit"
             disabled={saving}
