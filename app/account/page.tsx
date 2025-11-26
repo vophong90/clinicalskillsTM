@@ -98,16 +98,17 @@ export default function AccountPage() {
       }
 
       // tổng điểm
+      let total = 0;
       const { data: pointRow, error: pointErr } = await supabase
         .from('participant_points')
         .select('total_points')
         .eq('profile_id', u.id)
         .single();
 
-      if (!pointErr) {
-        const total = pointRow?.total_points ?? 0;
-        setTotalPoints(total);
+      if (!pointErr && pointRow) {
+        total = pointRow.total_points ?? 0;
       }
+      setTotalPoints(total);
 
       // lịch sử điểm
       const { data: logRows, error: logErr } = await supabase
@@ -129,14 +130,7 @@ export default function AccountPage() {
         .order('required_points', { ascending: true });
 
       if (!resErr && resRows) {
-        const unlocked = resRows.filter(
-          (r) => totalPoints >= r.required_points
-        );
-        // Chú ý: ở đây dùng totalPoints từ state cũ, mình sẽ tính lại bằng pointRow
-        const total = pointRow?.total_points ?? 0;
-        const unlockedByTotal = resRows.filter(
-          (r) => total >= r.required_points
-        );
+        const unlockedByTotal = resRows.filter((r) => total >= r.required_points);
         setResources(unlockedByTotal);
       }
 
@@ -165,7 +159,7 @@ export default function AccountPage() {
         if (authErr) {
           console.error(authErr);
           setProfileMsg('Cập nhật email đăng nhập không thành công.');
-          // không return, vẫn cho phép cập nhật profile để tránh khó chịu
+          // vẫn tiếp tục cập nhật profile bên dưới
         }
       }
 
@@ -199,7 +193,13 @@ export default function AccountPage() {
   }
 
   if (loading) {
-    return <p>Đang tải thông tin tài khoản…</p>;
+    return (
+      <main className="min-h-screen">
+        <div className="max-w-5xl mx-auto px-4 py-8">
+          <p className="text-sm text-gray-600">Đang tải thông tin tài khoản…</p>
+        </div>
+      </main>
+    );
   }
 
   const profileValues: ProfileFormValues = {
@@ -211,93 +211,104 @@ export default function AccountPage() {
   };
 
   return (
-    <div className="space-y-6">
-      <header className="border-b pb-3 mb-2">
-        <h1 className="text-2xl font-bold">Tài khoản của tôi</h1>
-        <p className="text-sm text-gray-600">
-          Thông tin tài khoản, điểm thưởng, tài nguyên và trợ lý GPT nội bộ.
-        </p>
-      </header>
+    <main className="min-h-screen">
+      <div className="max-w-5xl mx-auto px-4 py-8 space-y-6">
+        <header className="flex items-center justify-between gap-3">
+          <div>
+            <h1 className="text-2xl font-bold text-gray-900">
+              Tài khoản của tôi
+            </h1>
+            <p className="text-sm text-gray-600">
+              Quản lý thông tin cá nhân, điểm thưởng, tài nguyên và trợ lý GPT nội bộ.
+            </p>
+          </div>
+        </header>
 
-      {/* Tổng điểm luôn hiển thị ở trên */}
-      <section className="bg-blue-50 border border-blue-100 rounded-xl p-4 flex items-center justify-between gap-3">
-        <div>
-          <p className="text-sm text-gray-700">Tổng điểm thưởng</p>
-          <p className="text-2xl font-bold text-blue-700">{totalPoints} điểm</p>
+        {/* Card tổng điểm – theo kiểu card trắng giống admin main */}
+        <section className="bg-white border rounded-xl shadow-sm p-4 flex items-center justify-between gap-3">
+          <div>
+            <p className="text-sm text-gray-700">Tổng điểm thưởng</p>
+            <p className="text-2xl font-bold text-blue-700">
+              {totalPoints} điểm
+            </p>
+          </div>
+          <p className="text-xs text-gray-500 max-w-xs">
+            Bạn được cộng <strong>+20 điểm</strong> cho mỗi khảo sát hoàn thành (is_submitted).
+          </p>
+        </section>
+
+        {profileMsg && (
+          <p className="text-sm text-emerald-700" role="status">
+            {profileMsg}
+          </p>
+        )}
+
+        {/* Tabs – vẫn kiểu border-b, nhưng đặt trong container chung */}
+        <div className="bg-white border rounded-xl shadow-sm">
+          <div className="border-b border-gray-200 px-4 pt-3">
+            <nav className="-mb-px flex gap-4 text-sm">
+              <button
+                type="button"
+                onClick={() => setActiveTab('info')}
+                className={
+                  'px-3 py-2 border-b-2 ' +
+                  (activeTab === 'info'
+                    ? 'border-blue-600 text-blue-700 font-semibold'
+                    : 'border-transparent text-gray-600 hover:text-gray-800')
+                }
+              >
+                Thông tin chung
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab('resources')}
+                className={
+                  'px-3 py-2 border-b-2 ' +
+                  (activeTab === 'resources'
+                    ? 'border-blue-600 text-blue-700 font-semibold'
+                    : 'border-transparent text-gray-600 hover:text-gray-800')
+                }
+              >
+                Tài nguyên
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab('gpt')}
+                className={
+                  'px-3 py-2 border-b-2 ' +
+                  (activeTab === 'gpt'
+                    ? 'border-blue-600 text-blue-700 font-semibold'
+                    : 'border-transparent text-gray-600 hover:text-gray-800')
+                }
+              >
+                Trợ lý GPT
+              </button>
+            </nav>
+          </div>
+
+          {/* Nội dung từng tab trong cùng card trắng */}
+          <div className="p-4">
+            {activeTab === 'info' && (
+              <AccountInfoTab
+                initialValues={profileValues}
+                role={role}
+                saving={savingProfile}
+                onSave={handleSaveProfile}
+              />
+            )}
+
+            {activeTab === 'resources' && (
+              <AccountResourcesTab
+                totalPoints={totalPoints}
+                resources={resources}
+                logs={logs}
+              />
+            )}
+
+            {activeTab === 'gpt' && <AccountGptTab role={role} />}
+          </div>
         </div>
-        <p className="text-xs text-gray-600 max-w-xs">
-          Bạn được cộng <strong>+20 điểm</strong> cho mỗi khảo sát hoàn thành
-          (is_submitted).
-        </p>
-      </section>
-
-      {profileMsg && (
-        <p className="text-sm text-emerald-700" role="status">
-          {profileMsg}
-        </p>
-      )}
-
-      {/* Tabs */}
-      <div className="border-b border-gray-200 mb-3">
-        <nav className="-mb-px flex gap-4 text-sm">
-          <button
-            type="button"
-            onClick={() => setActiveTab('info')}
-            className={
-              'px-3 py-2 border-b-2 ' +
-              (activeTab === 'info'
-                ? 'border-blue-600 text-blue-700 font-semibold'
-                : 'border-transparent text-gray-600 hover:text-gray-800')
-            }
-          >
-            Thông tin chung
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveTab('resources')}
-            className={
-              'px-3 py-2 border-b-2 ' +
-              (activeTab === 'resources'
-                ? 'border-blue-600 text-blue-700 font-semibold'
-                : 'border-transparent text-gray-600 hover:text-gray-800')
-            }
-          >
-            Tài nguyên
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveTab('gpt')}
-            className={
-              'px-3 py-2 border-b-2 ' +
-              (activeTab === 'gpt'
-                ? 'border-blue-600 text-blue-700 font-semibold'
-                : 'border-transparent text-gray-600 hover:text-gray-800')
-            }
-          >
-            Trợ lý GPT
-          </button>
-        </nav>
       </div>
-
-      {/* Nội dung từng tab */}
-      {activeTab === 'info' && (
-        <AccountInfoTab
-          initialValues={profileValues}
-          role={role}
-          saving={savingProfile}
-          onSave={handleSaveProfile}
-        />
-      )}
-
-      {activeTab === 'resources' && (
-        <AccountResourcesTab
-          totalPoints={totalPoints}
-          resources={resources}
-          logs={logs}
-        />
-      )}
-
-      {activeTab === 'gpt' && <AccountGptTab role={role} />}
-    </div>
+    </main>
   );
 }
