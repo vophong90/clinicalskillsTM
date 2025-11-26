@@ -1,3 +1,5 @@
+// app/account/AccountResourcesTab.tsx
+
 type PointLog = {
   id: string;
   project_id: string | null;
@@ -26,35 +28,43 @@ export default function AccountResourcesTab({
   logs,
 }: Props) {
   return (
-    <section className="space-y-6">
-      <div className="space-y-2">
-        <h2 className="text-lg font-semibold text-gray-900">
+    <div className="space-y-4">
+      {/* Tài nguyên thưởng */}
+      <section className="space-y-2">
+        <h3 className="text-sm font-semibold text-gray-900">
           Tài nguyên đã mở khoá
-        </h2>
+        </h3>
+        <p className="text-[11px] text-gray-500 mb-1">
+          Khi hoàn thành khảo sát, bạn sẽ được cộng điểm thưởng và có thể tải
+          các tài liệu chuyên môn tương ứng với mốc điểm.
+        </p>
+
         {resources.length === 0 ? (
-          <p className="text-sm text-gray-600">
+          <div className="border rounded-lg bg-gray-50 p-3 text-sm text-gray-600">
             Bạn chưa đủ điểm để mở khoá bất kỳ tài nguyên nào. Hoàn thành thêm
-            khảo sát để tích điểm nhé.
-          </p>
+            các vòng khảo sát để tích điểm nhé.
+          </div>
         ) : (
           <ul className="space-y-2">
             {resources.map((r) => (
               <li
                 key={r.id}
-                className="border rounded-lg px-3 py-2 flex items-center justify-between gap-3 bg-gray-50"
+                className="border rounded-lg bg-white p-3 flex items-center justify-between gap-3"
               >
                 <div>
-                  <p className="font-semibold text-gray-900">{r.title}</p>
-                  <p className="text-xs text-gray-500">
-                    Yêu cầu ≥ {r.required_points} điểm &nbsp;•&nbsp; Bạn đã đạt{' '}
-                    {totalPoints} điểm
+                  <p className="font-semibold text-sm text-gray-900">
+                    {r.title}
+                  </p>
+                  <p className="text-[11px] text-gray-500">
+                    Yêu cầu ≥ {r.required_points} điểm • Bạn hiện có{' '}
+                    <strong>{totalPoints}</strong> điểm
                   </p>
                 </div>
                 <a
                   href={r.file_url}
                   target="_blank"
                   rel="noreferrer"
-                  className="text-sm text-blue-600 underline"
+                  className="text-xs px-3 py-1.5 rounded-md bg-blue-600 text-white hover:bg-blue-700"
                 >
                   Tải / xem
                 </a>
@@ -62,26 +72,34 @@ export default function AccountResourcesTab({
             ))}
           </ul>
         )}
-      </div>
+      </section>
 
-      <div className="space-y-2">
-        <h2 className="text-lg font-semibold text-gray-900">
-          Lịch sử điểm thưởng (gần đây)
-        </h2>
+      {/* Lịch sử điểm thưởng */}
+      <section className="space-y-2">
+        <h3 className="text-sm font-semibold text-gray-900">
+          Lịch sử điểm thưởng gần đây
+        </h3>
+        <p className="text-[11px] text-gray-500">
+          Hệ thống ghi nhận tối đa 100 lần cộng / trừ điểm gần nhất cho tài
+          khoản của bạn.
+        </p>
+
         {logs.length === 0 ? (
-          <p className="text-sm text-gray-600">Chưa có lịch sử điểm.</p>
+          <div className="border rounded-lg bg-gray-50 p-3 text-sm text-gray-600">
+            Chưa có lịch sử điểm.
+          </div>
         ) : (
-          <div className="overflow-x-auto border rounded-lg">
-            <table className="min-w-full text-sm bg-white">
+          <div className="border rounded-lg overflow-hidden bg-white">
+            <table className="min-w-full text-xs">
               <thead>
-                <tr className="border-b bg-gray-50">
-                  <th className="text-left px-3 py-2 text-xs font-semibold text-gray-600">
+                <tr className="bg-gray-50 border-b">
+                  <th className="text-left px-3 py-2 font-medium text-gray-700">
                     Thời gian
                   </th>
-                  <th className="text-left px-3 py-2 text-xs font-semibold text-gray-600">
+                  <th className="text-left px-3 py-2 font-medium text-gray-700">
                     Điểm
                   </th>
-                  <th className="text-left px-3 py-2 text-xs font-semibold text-gray-600">
+                  <th className="text-left px-3 py-2 font-medium text-gray-700">
                     Lý do
                   </th>
                 </tr>
@@ -96,9 +114,7 @@ export default function AccountResourcesTab({
                       <span
                         className={
                           'font-semibold ' +
-                          (log.points >= 0
-                            ? 'text-green-700'
-                            : 'text-red-700')
+                          (log.points >= 0 ? 'text-green-700' : 'text-red-700')
                         }
                       >
                         {log.points >= 0 ? `+${log.points}` : log.points}
@@ -111,7 +127,7 @@ export default function AccountResourcesTab({
             </table>
           </div>
         )}
-      </div>
-    </section>
+      </section>
+    </div>
   );
 }
