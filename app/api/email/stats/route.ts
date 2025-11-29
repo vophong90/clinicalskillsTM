@@ -32,7 +32,7 @@ export async function POST(req: NextRequest) {
       .from('email_log')
       .select('profile_id, sent_at, status, round_ids, mode')
       .eq('status', 'sent')
-      .eq('mode', 'invite')
+      .eq('mode', ['invite', 'remind'])
       .overlaps('round_ids', round_ids)
       .order('sent_at', { ascending: false })
       .range(from, from + PAGE - 1);
