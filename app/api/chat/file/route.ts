@@ -1,6 +1,13 @@
+// app/api/chat/file/route.ts
+
 import { NextRequest, NextResponse } from 'next/server';
 import OpenAI from 'openai';
 import { getTextExtractor } from 'office-text-extractor';
+
+// ⭐ THÊM MỚI:
+import { cookies } from 'next/headers';
+import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
+import { getAdminClient } from '@/lib/supabase-admin';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -14,6 +21,19 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(
       { error: 'OPENAI_API_KEY chưa được cấu hình.' },
       { status: 500 }
+    );
+  }
+
+  // ⭐ THÊM MỚI: lấy user hiện tại (để biết profile_id ghi log)
+  const supabase = createRouteHandlerClient({ cookies });
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    return NextResponse.json(
+      { error: 'Bạn cần đăng nhập trước khi dùng GPT.' },
+      { status: 401 }
     );
   }
 
@@ -32,12 +52,10 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // Giới hạn số file & kích thước để tránh quá tải
   const MAX_FILES = 5;
   const MAX_SIZE = 10 * 1024 * 1024; // 10MB / file
 
   const limitedFiles = files.slice(0, MAX_FILES);
-
   const contents: string[] = [];
 
   for (const file of limitedFiles) {
@@ -52,7 +70,6 @@ export async function POST(req: NextRequest) {
       const arrayBuffer = await file.arrayBuffer();
       const buffer = Buffer.from(arrayBuffer);
 
-      // office-text-extractor tự nhận diện: pdf/docx/pptx/xlsx...
       const text = await extractor.extractText({
         input: buffer,
         type: 'buffer',
@@ -98,13 +115,48 @@ export async function POST(req: NextRequest) {
 
   try {
     const completion = await openai.chat.completions.create({
-      model: 'gpt-4.1', // hoặc cho phép client chọn model nếu muốn
+      model: 'gpt-4.1',
       messages,
       temperature: 0.2,
     });
 
     const reply =
       completion.choices[0]?.message?.content ?? '(Không có nội dung trả về)';
+
+    // ⭐ THÊM MỚI: ghi log GPT usage
+    const usage = completion.usage;
+    const prompt_tokens = usage?.prompt_tokens ?? null;
+    const completion_tokens = usage?.completion_tokens ?? null;
+    const total_tokens = usage?.total_tokens ?? null;
+
+    // Ước lượng số ký tự request/response
+    const request_chars = JSON.stringify({ instruction }).length + joined.length;
+    const response_chars = reply.length;
+
+    const admin = getAdminClient();
+    void admin
+      .from('gpt_usage_logs')
+      .insert({
+        profile_id: user.id,          // profiles.id = auth.users.id
+        model: 'gpt-4.1',
+        provider: 'openai',
+        endpoint: '/api/chat/file',
+        prompt_tokens,
+        completion_tokens,
+        total_tokens,
+        request_chars,
+        response_chars,
+        context: {
+          fileCount: limitedFiles.length,
+          originalFileCount: files.length,
+          instructionLength: instruction.length,
+        },
+      })
+      .then(({ error }) => {
+        if (error) {
+          console.error('Ghi log GPT (file) thất bại:', error);
+        }
+      });
 
     return NextResponse.json({ reply });
   } catch (err: any) {
