@@ -1,6 +1,9 @@
 // app/api/chat/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import OpenAI from 'openai';
+import { cookies } from 'next/headers';
+import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
+import { getAdminClient } from '@/lib/supabase-admin';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -45,6 +48,19 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(
       { error: 'OPENAI_API_KEY chưa được cấu hình.' },
       { status: 500 }
+    );
+  }
+
+  // Lấy user hiện tại để map vào profile_id (bảng profiles.id = auth.users.id)
+  const supabase = createRouteHandlerClient({ cookies });
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    return NextResponse.json(
+      { error: 'Bạn cần đăng nhập trước khi dùng GPT.' },
+      { status: 401 }
     );
   }
 
@@ -202,6 +218,41 @@ export async function POST(req: NextRequest) {
 
     const reply =
       completion.choices[0]?.message?.content ?? '(Không có nội dung trả về)';
+
+    // ===== GHI LOG GPT USAGE VÀO gpt_usage_logs =====
+    const usage = completion.usage;
+    const prompt_tokens = usage?.prompt_tokens ?? null;
+    const completion_tokens = usage?.completion_tokens ?? null;
+    const total_tokens = usage?.total_tokens ?? null;
+
+    // Ước lượng số ký tự request/response
+    const request_chars = JSON.stringify({ model, messages, attachments }).length;
+    const response_chars = reply.length;
+
+    const admin = getAdminClient();
+    void admin
+      .from('gpt_usage_logs')
+      .insert({
+        profile_id: user.id, // profiles.id = auth.users.id
+        model,
+        provider: 'openai',
+        endpoint: '/api/chat',
+        prompt_tokens,
+        completion_tokens,
+        total_tokens,
+        request_chars,
+        response_chars,
+        context: {
+          attachmentsCount: attachments.length,
+          hasImages: attachments.some((a) => a.kind === 'image'),
+        },
+      })
+      .then(({ error }) => {
+        if (error) {
+          console.error('Ghi log GPT (/api/chat) thất bại:', error);
+        }
+      });
+    // ===== HẾT PHẦN LOGGING =====
 
     return NextResponse.json({ reply });
   } catch (err: any) {
