@@ -21,7 +21,8 @@ const BTN_SECONDARY =
 const BTN_DANGER =
   'inline-flex items-center px-3 py-1.5 rounded-lg font-semibold bg-red-600 text-white hover:bg-red-700 disabled:opacity-50';
 
-const PAGE_SIZE = 50;
+/** ✅ mỗi trang chỉ 10 project */
+const PAGE_SIZE = 10;
 
 /** Map status DB -> UI tiếng Việt */
 const PROJECT_STATUS_OPTIONS = [
@@ -436,7 +437,7 @@ export default function AdminProjectManager() {
         </div>
       </section>
 
-      {/* ===== LIST ===== */}
+      {/* ===== LIST (CARD VIEW) ===== */}
       <section className="bg-white border rounded-xl p-4 space-y-3">
         <div className="flex items-center justify-between flex-wrap gap-3">
           <h3 className="font-semibold">📋 Danh sách Project</h3>
@@ -458,114 +459,115 @@ export default function AdminProjectManager() {
         {loading ? (
           <div>Đang tải...</div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="min-w-full border text-sm bg-white">
-              <thead>
-                <tr className="bg-gray-100">
-                  <th className="p-2 border text-left">Title</th>
-                  <th className="p-2 border text-left">Description</th>
-                  <th className="p-2 border text-left">Status</th>
-                  <th className="p-2 border text-left">Created at</th>
-                  <th className="p-2 border text-left">Actions</th>
-                </tr>
-              </thead>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+            {projects.map((p) => {
+              const d = drafts[p.id] ?? { title: p.title, description: p.description ?? '', status: p.status };
+              const dirty =
+                d.title !== p.title ||
+                (d.description ?? '') !== (p.description ?? '') ||
+                d.status !== p.status;
 
-              <tbody>
-                {projects.map((p) => {
-                  const d = drafts[p.id] ?? { title: p.title, description: p.description ?? '', status: p.status };
-                  const dirty =
-                    d.title !== p.title ||
-                    (d.description ?? '') !== (p.description ?? '') ||
-                    d.status !== p.status;
+              return (
+                <div key={p.id} className="border rounded-xl p-3 bg-white shadow-sm">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="text-xs text-gray-500">Project</div>
+                      <div className="text-sm font-semibold text-gray-900 truncate">{p.title}</div>
+                      <div className="text-sm text-gray-700">
+                        Tạo lúc: <span className="font-medium">{new Date(p.created_at).toLocaleString()}</span>
+                      </div>
+                    </div>
 
-                  return (
-                    <tr key={p.id} className="border-t align-top">
-                      <td className="p-2 border min-w-[220px]">
-                        <input
-                          className={INPUT}
-                          value={d.title}
-                          onChange={(e) =>
-                            setDrafts((prev) => ({
-                              ...prev,
-                              [p.id]: { ...d, title: e.target.value },
-                            }))
-                          }
-                        />
-                      </td>
+                    <div className="text-right">
+                      <div className="text-xs text-gray-500">Trạng thái hiện tại</div>
+                      <div className="text-sm font-semibold">{viProjectStatus(p.status)}</div>
+                    </div>
+                  </div>
 
-                      <td className="p-2 border min-w-[360px]">
-                        <textarea
-                          className={INPUT}
-                          rows={2}
-                          value={d.description}
-                          onChange={(e) =>
-                            setDrafts((prev) => ({
-                              ...prev,
-                              [p.id]: { ...d, description: e.target.value },
-                            }))
-                          }
-                        />
-                      </td>
+                  <div className="mt-3 space-y-3">
+                    <div>
+                      <label className="text-sm text-gray-600">Title</label>
+                      <input
+                        className={INPUT}
+                        value={d.title}
+                        onChange={(e) =>
+                          setDrafts((prev) => ({
+                            ...prev,
+                            [p.id]: { ...d, title: e.target.value },
+                          }))
+                        }
+                      />
+                    </div>
 
-                      {/* ✅ Status cột trong bảng: hiển thị tiếng Việt */}
-                      <td className="p-2 border min-w-[220px]">
-                        <div className="mb-2 text-xs text-gray-600">
-                          Hiện tại: <span className="font-semibold text-gray-900">{viProjectStatus(p.status)}</span>
-                        </div>
+                    <div>
+                      <label className="text-sm text-gray-600">Description</label>
+                      <textarea
+                        className={INPUT}
+                        rows={3}
+                        value={d.description}
+                        onChange={(e) =>
+                          setDrafts((prev) => ({
+                            ...prev,
+                            [p.id]: { ...d, description: e.target.value },
+                          }))
+                        }
+                      />
+                    </div>
 
-                        <select
-                          className={INPUT}
-                          value={d.status}
-                          onChange={(e) =>
-                            setDrafts((prev) => ({
-                              ...prev,
-                              [p.id]: { ...d, status: e.target.value },
-                            }))
-                          }
+                    <div>
+                      <label className="text-sm text-gray-600">Status</label>
+                      <select
+                        className={INPUT}
+                        value={d.status}
+                        onChange={(e) =>
+                          setDrafts((prev) => ({
+                            ...prev,
+                            [p.id]: { ...d, status: e.target.value },
+                          }))
+                        }
+                      >
+                        {PROJECT_STATUS_OPTIONS.map((o) => (
+                          <option key={o.value} value={o.value}>
+                            {o.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <div className="text-xs">
+                        {dirty ? (
+                          <span className="text-amber-700">* Có thay đổi chưa lưu</span>
+                        ) : (
+                          <span className="text-gray-500">Không có thay đổi</span>
+                        )}
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <button
+                          className={BTN_PRIMARY}
+                          disabled={!dirty || savingId === p.id}
+                          onClick={() => updateProject(p.id)}
+                          type="button"
                         >
-                          {PROJECT_STATUS_OPTIONS.map((o) => (
-                            <option key={o.value} value={o.value}>
-                              {o.label}
-                            </option>
-                          ))}
-                        </select>
-                      </td>
+                          {savingId === p.id ? 'Đang cập nhật…' : 'Cập nhật'}
+                        </button>
 
-                      <td className="p-2 border whitespace-nowrap text-gray-700">
-                        {new Date(p.created_at).toLocaleString()}
-                      </td>
+                        <button className={BTN_DANGER} onClick={() => deleteProject(p.id)} type="button">
+                          🗑️ Xóa
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
 
-                      <td className="p-2 border whitespace-nowrap">
-                        <div className="flex items-center gap-2">
-                          <button
-                            className={BTN_PRIMARY}
-                            disabled={!dirty || savingId === p.id}
-                            onClick={() => updateProject(p.id)}
-                            type="button"
-                          >
-                            {savingId === p.id ? 'Đang cập nhật…' : 'Cập nhật'}
-                          </button>
-
-                          <button className={BTN_DANGER} onClick={() => deleteProject(p.id)} type="button">
-                            🗑️ Xóa
-                          </button>
-                        </div>
-
-                        {dirty && <div className="text-xs text-amber-700 mt-1">* Có thay đổi chưa lưu</div>}
-                      </td>
-                    </tr>
-                  );
-                })}
-
-                {projects.length === 0 && (
-                  <tr>
-                    <td colSpan={5} className="p-4 text-center text-gray-500">
-                      Không có project phù hợp bộ lọc.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
+            {projects.length === 0 && (
+              <div className="col-span-full p-4 text-center text-gray-500 border rounded-xl bg-gray-50">
+                Không có project phù hợp bộ lọc.
+              </div>
+            )}
           </div>
         )}
       </section>
