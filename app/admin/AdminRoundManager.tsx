@@ -21,13 +21,12 @@ const INPUT =
 const BTN_PRIMARY =
   'inline-flex items-center px-4 py-2 rounded-lg font-semibold bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50';
 const BTN_SECONDARY =
-  'inline-flex items-center px-3 py-1.5 rounded-lg font-semibold bg-gray-100 text-gray-800 hover:bg-gray-200 disabled:opacity-50';
+  'inline-flex items-center px-3 py-2 rounded-lg font-semibold bg-gray-100 text-gray-800 hover:bg-gray-200 disabled:opacity-50';
 const BTN_DANGER =
-  'inline-flex items-center px-3 py-1.5 rounded-lg font-semibold bg-red-600 text-white hover:bg-red-700 disabled:opacity-50';
+  'inline-flex items-center px-3 py-2 rounded-lg font-semibold bg-red-600 text-white hover:bg-red-700 disabled:opacity-50';
 
 const PAGE_SIZE = 50;
 
-/** status DB -> UI tiếng Việt */
 const ROUND_STATUS_OPTIONS = [
   { value: 'draft', label: 'Bản nháp' },
   { value: 'active', label: 'Hoạt động' },
@@ -36,6 +35,19 @@ const ROUND_STATUS_OPTIONS = [
 
 function viRoundStatus(value: string) {
   return ROUND_STATUS_OPTIONS.find((o) => o.value === value)?.label ?? value;
+}
+
+function statusPillClass(value: string) {
+  switch (value) {
+    case 'draft':
+      return 'bg-gray-100 text-gray-700';
+    case 'active':
+      return 'bg-green-100 text-green-700';
+    case 'closed':
+      return 'bg-yellow-100 text-yellow-700';
+    default:
+      return 'bg-gray-100 text-gray-700';
+  }
 }
 
 function toStartOfDayISO(dateStr: string) {
@@ -49,7 +61,6 @@ function toNextDayStartISO(dateStr: string) {
 
 function formatLocalDT(value: string | null) {
   if (!value) return '';
-  // input datetime-local expects "YYYY-MM-DDTHH:mm"
   const d = new Date(value);
   const pad = (n: number) => String(n).padStart(2, '0');
   const yyyy = d.getFullYear();
@@ -61,7 +72,6 @@ function formatLocalDT(value: string | null) {
 }
 
 function parseLocalDT(value: string) {
-  // datetime-local -> ISO string (UTC) via Date
   if (!value) return null;
   const d = new Date(value);
   return d.toISOString();
@@ -72,27 +82,35 @@ export default function AdminRoundManager() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [rounds, setRounds] = useState<Round[]>([]);
   const [total, setTotal] = useState(0);
-  const [page, setPage] = useState(1);
-  const totalPages = useMemo(() => Math.max(1, Math.ceil(total / PAGE_SIZE)), [total]);
 
   // ===== UI =====
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState('');
 
+  // ===== PAGINATION =====
+  const [page, setPage] = useState(1);
+  const totalPages = useMemo(() => Math.max(1, Math.ceil(total / PAGE_SIZE)), [total]);
+
   // ===== CREATE (multi-project) =====
   const [selectedProjectIds, setSelectedProjectIds] = useState<Set<string>>(() => new Set());
-  const [autoNumber, setAutoNumber] = useState(true); // default: tự động max+1
+  const [autoNumber, setAutoNumber] = useState(true);
   const [manualNumber, setManualNumber] = useState(1);
-  const [createStatus, setCreateStatus] = useState<(typeof ROUND_STATUS_OPTIONS)[number]['value']>('active');
+  const [createStatus, setCreateStatus] =
+    useState<(typeof ROUND_STATUS_OPTIONS)[number]['value']>('active');
   const [createDescription, setCreateDescription] = useState('');
   const [createOpenAt, setCreateOpenAt] = useState<string>(''); // datetime-local
   const [createCloseAt, setCreateCloseAt] = useState<string>(''); // datetime-local
   const [creating, setCreating] = useState(false);
 
-  // ===== FILTERS =====
+  // ===== FILTERS (LIST) =====
+  const [filterProjectId, setFilterProjectId] = useState<string>(''); // NEW
   const [filterStatus, setFilterStatus] = useState<string>(''); // '' all
   const [dateFrom, setDateFrom] = useState<string>(''); // YYYY-MM-DD
   const [dateTo, setDateTo] = useState<string>(''); // YYYY-MM-DD
+
+  // ===== FILTERS (CREATE PROJECT PICKER) =====
+  const [createProjectFilterId, setCreateProjectFilterId] = useState<string>(''); // NEW
+  const [createProjectSearch, setCreateProjectSearch] = useState<string>(''); // NEW
 
   // ===== INLINE EDIT =====
   const [drafts, setDrafts] = useState<
@@ -102,8 +120,8 @@ export default function AdminRoundManager() {
         round_number: number;
         status: string;
         description: string;
-        open_at: string; // datetime-local string
-        close_at: string; // datetime-local string
+        open_at: string;
+        close_at: string;
       }
     >
   >({});
@@ -118,10 +136,14 @@ export default function AdminRoundManager() {
   useEffect(() => {
     loadRounds(1);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filterStatus, dateFrom, dateTo]);
+  }, [filterProjectId, filterStatus, dateFrom, dateTo]);
 
   async function loadProjects() {
-    const { data, error } = await supabase.from('projects').select('id, title').order('created_at', { ascending: false });
+    const { data, error } = await supabase
+      .from('projects')
+      .select('id, title')
+      .order('created_at', { ascending: false });
+
     if (error) {
       setMessage('❌ Lỗi tải projects: ' + error.message);
       setProjects([]);
@@ -139,14 +161,18 @@ export default function AdminRoundManager() {
 
     let q = supabase
       .from('rounds')
-      .select('id, project_id, round_number, status, description, open_at, close_at, created_at', { count: 'exact' })
+      .select('id, project_id, round_number, status, description, open_at, close_at, created_at', {
+        count: 'exact',
+      })
       .order('created_at', { ascending: false });
 
+    if (filterProjectId) q = q.eq('project_id', filterProjectId);
     if (filterStatus) q = q.eq('status', filterStatus);
     if (dateFrom) q = q.gte('created_at', toStartOfDayISO(dateFrom));
     if (dateTo) q = q.lt('created_at', toNextDayStartISO(dateTo));
 
     const { data, error, count } = await q.range(from, to);
+
     if (error) {
       setRounds([]);
       setTotal(0);
@@ -196,12 +222,39 @@ export default function AdminRoundManager() {
     });
   }
 
-  function toggleSelectAllProjects() {
+  function clearSelectedProjects() {
+    setSelectedProjectIds(new Set());
+  }
+
+  function toggleSelectAllVisibleProjects(visible: Project[]) {
     setSelectedProjectIds((prev) => {
-      if (prev.size === projects.length) return new Set();
-      return new Set(projects.map((p) => p.id));
+      const allVisibleSelected = visible.every((p) => prev.has(p.id));
+      const next = new Set(prev);
+
+      if (allVisibleSelected) {
+        visible.forEach((p) => next.delete(p.id));
+      } else {
+        visible.forEach((p) => next.add(p.id));
+      }
+      return next;
     });
   }
+
+  // ===== visible projects in CREATE picker (filter + search) =====
+  const createVisibleProjects = useMemo(() => {
+    let list = projects;
+
+    if (createProjectFilterId) {
+      list = list.filter((p) => p.id === createProjectFilterId);
+    }
+
+    const kw = createProjectSearch.trim().toLowerCase();
+    if (kw) {
+      list = list.filter((p) => p.title.toLowerCase().includes(kw));
+    }
+
+    return list;
+  }, [projects, createProjectFilterId, createProjectSearch]);
 
   // ===== CREATE multi =====
   async function createRoundsForSelectedProjects() {
@@ -220,16 +273,14 @@ export default function AdminRoundManager() {
 
     setCreating(true);
     try {
-      // 1) tìm max round_number theo từng project (để autoNumber)
       const selectedIds = Array.from(selectedProjectIds);
 
+      // 1) auto number: max+1 each project
       let nextNumberByProject = new Map<string, number>();
       if (autoNumber) {
-        // Lấy toàn bộ rounds của các project đã chọn (chỉ cột cần)
-        // (Giới hạn 1000? -> ở đây thường số round/proj ít; nhưng vẫn làm phân trang an toàn)
         const PAGE = 1000;
         let from = 0;
-        let all: Array<{ project_id: string; round_number: number }> = [];
+        const all: Array<{ project_id: string; round_number: number }> = [];
 
         while (true) {
           const { data, error } = await supabase
@@ -241,7 +292,7 @@ export default function AdminRoundManager() {
             .range(from, from + PAGE - 1);
 
           if (error) throw error;
-          all.push(...((data as any[]) ?? []));
+          all.push(...(((data as any[]) ?? []) as any));
           if (!data || data.length < PAGE) break;
           from += PAGE;
         }
@@ -281,7 +332,6 @@ export default function AdminRoundManager() {
       setCreateDescription('');
       setCreateOpenAt('');
       setCreateCloseAt('');
-      // giữ selected để tạo tiếp nếu muốn
       await loadRounds(1);
     } catch (e: any) {
       setMessage('❌ Lỗi tạo round hàng loạt: ' + (e?.message ?? String(e)));
@@ -332,39 +382,89 @@ export default function AdminRoundManager() {
   }
 
   return (
-    <div className="w-full mx-auto py-8 space-y-6">
-      <h2 className="text-2xl font-bold">🔄 Quản lý Round</h2>
+    <div className="max-w-6xl mx-auto py-8 px-4 space-y-6">
+      <header className="flex items-center justify-between flex-wrap gap-3">
+        <h2 className="text-2xl font-bold">🔄 Quản lý Round</h2>
+        <div className="text-sm text-gray-600">
+          {loading ? 'Đang tải…' : `Tổng: ${total} | Trang ${page}/${totalPages}`}
+        </div>
+      </header>
 
-      {message && <div className="rounded-lg border bg-green-50 text-green-700 px-3 py-2">{message}</div>}
+      {message && (
+        <div className="rounded-xl border bg-green-50 text-green-700 px-4 py-3">{message}</div>
+      )}
 
       {/* ===== CREATE multi-project ===== */}
-      <section className="bg-white border rounded-xl p-4 space-y-4">
-        <h3 className="font-semibold">➕ Tạo Round (chọn nhiều Project)</h3>
+      <section className="bg-white border rounded-2xl p-5 space-y-4 shadow-sm">
+        <h3 className="font-semibold text-lg">➕ Tạo Round (chọn nhiều Project)</h3>
 
-        {/* Project multi-select */}
+        {/* Filters for project picker */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <div>
+            <label className="text-sm text-gray-600">Lọc nhanh theo Project</label>
+            <select
+              className={INPUT}
+              value={createProjectFilterId}
+              onChange={(e) => setCreateProjectFilterId(e.target.value)}
+            >
+              <option value="">— Tất cả Project —</option>
+              {projects.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.title}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="md:col-span-2">
+            <label className="text-sm text-gray-600">Tìm project theo tên</label>
+            <input
+              className={INPUT}
+              placeholder="Gõ để lọc danh sách project…"
+              value={createProjectSearch}
+              onChange={(e) => setCreateProjectSearch(e.target.value)}
+            />
+          </div>
+        </div>
+
+        {/* Selected count + actions */}
         <div className="flex items-center justify-between flex-wrap gap-2">
           <div className="text-sm text-gray-700">
             Đã chọn: <b>{selectedProjectIds.size}</b> project
           </div>
-          <button
-            type="button"
-            className={BTN_SECONDARY}
-            onClick={toggleSelectAllProjects}
-            disabled={projects.length === 0}
-          >
-            {selectedProjectIds.size === projects.length ? 'Bỏ chọn tất cả' : 'Chọn tất cả'}
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              className={BTN_SECONDARY}
+              onClick={() => toggleSelectAllVisibleProjects(createVisibleProjects)}
+              disabled={createVisibleProjects.length === 0}
+            >
+              Chọn/Bỏ chọn (theo danh sách đang lọc)
+            </button>
+            <button
+              type="button"
+              className={BTN_SECONDARY}
+              onClick={clearSelectedProjects}
+              disabled={selectedProjectIds.size === 0}
+            >
+              Xóa chọn
+            </button>
+          </div>
         </div>
 
-        <div className="max-h-56 overflow-auto border rounded-lg p-2 bg-gray-50">
-          {projects.length === 0 ? (
-            <div className="text-sm text-gray-500 p-2">Chưa có project.</div>
+        {/* Project checklist */}
+        <div className="max-h-60 overflow-auto border rounded-xl p-3 bg-gray-50">
+          {createVisibleProjects.length === 0 ? (
+            <div className="text-sm text-gray-500">Không có project phù hợp bộ lọc.</div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-              {projects.map((p) => {
+              {createVisibleProjects.map((p) => {
                 const checked = selectedProjectIds.has(p.id);
                 return (
-                  <label key={p.id} className="flex items-center gap-2 px-2 py-1 rounded hover:bg-white">
+                  <label
+                    key={p.id}
+                    className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-white"
+                  >
                     <input type="checkbox" checked={checked} onChange={() => toggleProject(p.id)} />
                     <span className="text-sm">{p.title}</span>
                   </label>
@@ -375,8 +475,8 @@ export default function AdminRoundManager() {
         </div>
 
         {/* Create options */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          <div className="space-y-2">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="space-y-3">
             <label className="flex items-center gap-2 text-sm">
               <input
                 type="checkbox"
@@ -415,9 +515,9 @@ export default function AdminRoundManager() {
             </div>
           </div>
 
-          <div className="space-y-2">
+          <div className="space-y-3">
             <div>
-              <label className="text-sm text-gray-600">Mở lúc (open_at) (tuỳ chọn)</label>
+              <label className="text-sm text-gray-600">Ngày mở (open_at) (tuỳ chọn)</label>
               <input
                 className={INPUT}
                 type="datetime-local"
@@ -426,7 +526,7 @@ export default function AdminRoundManager() {
               />
             </div>
             <div>
-              <label className="text-sm text-gray-600">Đóng lúc (close_at) (tuỳ chọn)</label>
+              <label className="text-sm text-gray-600">Ngày đóng (close_at) (tuỳ chọn)</label>
               <input
                 className={INPUT}
                 type="datetime-local"
@@ -458,10 +558,27 @@ export default function AdminRoundManager() {
         </button>
       </section>
 
-      {/* ===== FILTERS ===== */}
-      <section className="bg-white border rounded-xl p-4 space-y-3">
-        <h3 className="font-semibold">🔎 Bộ lọc</h3>
+      {/* ===== FILTERS (LIST) ===== */}
+      <section className="bg-white border rounded-2xl p-5 space-y-3 shadow-sm">
+        <h3 className="font-semibold text-lg">🔎 Bộ lọc danh sách Round</h3>
+
         <div className="grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
+          <div>
+            <label className="text-sm text-gray-600">Project</label>
+            <select
+              className={INPUT}
+              value={filterProjectId}
+              onChange={(e) => setFilterProjectId(e.target.value)}
+            >
+              <option value="">— Tất cả Project —</option>
+              {projects.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.title}
+                </option>
+              ))}
+            </select>
+          </div>
+
           <div>
             <label className="text-sm text-gray-600">Trạng thái</label>
             <select className={INPUT} value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}>
@@ -484,11 +601,12 @@ export default function AdminRoundManager() {
             <input className={INPUT} type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
           </div>
 
-          <div className="flex gap-2">
+          <div className="md:col-span-4 flex gap-2">
             <button
               className={BTN_SECONDARY}
               type="button"
               onClick={() => {
+                setFilterProjectId('');
                 setFilterStatus('');
                 setDateFrom('');
                 setDateTo('');
@@ -501,22 +619,28 @@ export default function AdminRoundManager() {
       </section>
 
       {/* ===== LIST ===== */}
-      <section className="bg-white border rounded-xl p-4 space-y-3">
+      <section className="bg-white border rounded-2xl p-5 space-y-3 shadow-sm">
         <div className="flex items-center justify-between flex-wrap gap-3">
-          <h3 className="font-semibold">📋 Danh sách Round</h3>
-          <div className="text-sm text-gray-600">
-            {loading ? 'Đang tải…' : `Tổng: ${total} | Trang ${page}/${totalPages}`}
-          </div>
-        </div>
+          <h3 className="font-semibold text-lg">📋 Danh sách Round</h3>
 
-        {/* Pagination */}
-        <div className="flex items-center gap-2">
-          <button className={BTN_SECONDARY} disabled={page <= 1 || loading} onClick={() => loadRounds(page - 1)}>
-            ◀ Trang trước
-          </button>
-          <button className={BTN_SECONDARY} disabled={page >= totalPages || loading} onClick={() => loadRounds(page + 1)}>
-            Trang sau ▶
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              className={BTN_SECONDARY}
+              disabled={page <= 1 || loading}
+              onClick={() => loadRounds(page - 1)}
+              type="button"
+            >
+              ◀ Trang trước
+            </button>
+            <button
+              className={BTN_SECONDARY}
+              disabled={page >= totalPages || loading}
+              onClick={() => loadRounds(page + 1)}
+              type="button"
+            >
+              Trang sau ▶
+            </button>
+          </div>
         </div>
 
         {loading ? (
@@ -528,12 +652,12 @@ export default function AdminRoundManager() {
                 <tr className="bg-gray-100">
                   <th className="p-2 border text-left">Project</th>
                   <th className="p-2 border text-left">Số vòng</th>
-                  <th className="p-2 border text-left">Status</th>
-                  <th className="p-2 border text-left">open_at</th>
-                  <th className="p-2 border text-left">close_at</th>
+                  <th className="p-2 border text-left">Trạng thái</th>
+                  <th className="p-2 border text-left">Ngày mở</th>
+                  <th className="p-2 border text-left">Ngày đóng</th>
                   <th className="p-2 border text-left">Mô tả</th>
-                  <th className="p-2 border text-left">Created at</th>
-                  <th className="p-2 border text-left">Actions</th>
+                  <th className="p-2 border text-left">Ngày tạo</th>
+                  <th className="p-2 border text-left">Thao tác</th>
                 </tr>
               </thead>
 
@@ -557,7 +681,7 @@ export default function AdminRoundManager() {
 
                   return (
                     <tr key={r.id} className="border-t align-top">
-                      <td className="p-2 border min-w-[240px]">
+                      <td className="p-2 border min-w-[260px]">
                         <div className="font-medium">{projectTitleById.get(r.project_id) ?? r.project_id}</div>
                         <div className="text-xs text-gray-500 font-mono">{r.project_id}</div>
                       </td>
@@ -577,10 +701,13 @@ export default function AdminRoundManager() {
                         />
                       </td>
 
-                      <td className="p-2 border min-w-[220px]">
-                        <div className="mb-2 text-xs text-gray-600">
-                          Hiện tại: <span className="font-semibold text-gray-900">{viRoundStatus(r.status)}</span>
+                      <td className="p-2 border min-w-[200px]">
+                        <div className="mb-2">
+                          <span className={`inline-flex px-2 py-0.5 rounded text-xs font-semibold ${statusPillClass(r.status)}`}>
+                            {viRoundStatus(r.status)}
+                          </span>
                         </div>
+
                         <select
                           className={INPUT}
                           value={d.status}
@@ -599,7 +726,7 @@ export default function AdminRoundManager() {
                         </select>
                       </td>
 
-                      <td className="p-2 border min-w-[220px]">
+                      <td className="p-2 border min-w-[210px]">
                         <input
                           className={INPUT}
                           type="datetime-local"
@@ -613,7 +740,7 @@ export default function AdminRoundManager() {
                         />
                       </td>
 
-                      <td className="p-2 border min-w-[220px]">
+                      <td className="p-2 border min-w-[210px]">
                         <input
                           className={INPUT}
                           type="datetime-local"
@@ -627,7 +754,7 @@ export default function AdminRoundManager() {
                         />
                       </td>
 
-                      <td className="p-2 border min-w-[360px]">
+                      <td className="p-2 border min-w-[340px]">
                         <textarea
                           className={INPUT}
                           rows={2}
@@ -639,6 +766,7 @@ export default function AdminRoundManager() {
                             }))
                           }
                         />
+                        {dirty && <div className="text-xs text-amber-700 mt-1">* Có thay đổi chưa lưu</div>}
                       </td>
 
                       <td className="p-2 border whitespace-nowrap text-gray-700">
@@ -660,8 +788,6 @@ export default function AdminRoundManager() {
                             🗑️ Xóa
                           </button>
                         </div>
-
-                        {dirty && <div className="text-xs text-amber-700 mt-1">* Có thay đổi chưa lưu</div>}
                       </td>
                     </tr>
                   );
