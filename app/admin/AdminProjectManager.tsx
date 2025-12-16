@@ -21,7 +21,7 @@ const BTN_SECONDARY =
 const BTN_DANGER =
   'inline-flex items-center px-3 py-1.5 rounded-lg font-semibold bg-red-600 text-white hover:bg-red-700 disabled:opacity-50';
 
-/** ✅ mỗi trang chỉ 10 project */
+// ✅ 10 project / trang
 const PAGE_SIZE = 10;
 
 /** Map status DB -> UI tiếng Việt */
@@ -313,6 +313,9 @@ export default function AdminProjectManager() {
     }
   }
 
+  const COMPACT_INPUT =
+    'w-full border rounded-md px-2 py-1 text-sm outline-none focus:border-blue-300 focus:ring-2 focus:ring-blue-200';
+
   return (
     <div className="w-full mx-auto py-8 space-y-6">
       <h2 className="text-2xl font-bold">📁 Quản lý Project</h2>
@@ -437,7 +440,7 @@ export default function AdminProjectManager() {
         </div>
       </section>
 
-      {/* ===== LIST (CARD VIEW) ===== */}
+      {/* ===== LIST (COMPACT 1-ROW CARDS) ===== */}
       <section className="bg-white border rounded-xl p-4 space-y-3">
         <div className="flex items-center justify-between flex-wrap gap-3">
           <h3 className="font-semibold">📋 Danh sách Project</h3>
@@ -459,7 +462,7 @@ export default function AdminProjectManager() {
         {loading ? (
           <div>Đang tải...</div>
         ) : (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+          <div className="space-y-2">
             {projects.map((p) => {
               const d = drafts[p.id] ?? { title: p.title, description: p.description ?? '', status: p.status };
               const dirty =
@@ -468,27 +471,16 @@ export default function AdminProjectManager() {
                 d.status !== p.status;
 
               return (
-                <div key={p.id} className="border rounded-xl p-3 bg-white shadow-sm">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <div className="text-xs text-gray-500">Project</div>
-                      <div className="text-sm font-semibold text-gray-900 truncate">{p.title}</div>
-                      <div className="text-sm text-gray-700">
-                        Tạo lúc: <span className="font-medium">{new Date(p.created_at).toLocaleString()}</span>
-                      </div>
-                    </div>
-
-                    <div className="text-right">
-                      <div className="text-xs text-gray-500">Trạng thái hiện tại</div>
-                      <div className="text-sm font-semibold">{viProjectStatus(p.status)}</div>
-                    </div>
-                  </div>
-
-                  <div className="mt-3 space-y-3">
-                    <div>
-                      <label className="text-sm text-gray-600">Title</label>
+                <div
+                  key={p.id}
+                  className="border rounded-lg px-3 py-2 bg-white hover:bg-gray-50 transition flex items-center gap-3"
+                >
+                  {/* LEFT: compact editable fields */}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <div className="text-xs text-gray-500 shrink-0">Title</div>
                       <input
-                        className={INPUT}
+                        className={COMPACT_INPUT}
                         value={d.title}
                         onChange={(e) =>
                           setDrafts((prev) => ({
@@ -499,12 +491,12 @@ export default function AdminProjectManager() {
                       />
                     </div>
 
-                    <div>
-                      <label className="text-sm text-gray-600">Description</label>
-                      <textarea
-                        className={INPUT}
-                        rows={3}
+                    <div className="mt-2 flex items-center gap-2">
+                      <div className="text-xs text-gray-500 shrink-0">Desc</div>
+                      <input
+                        className={COMPACT_INPUT}
                         value={d.description}
+                        placeholder="(trống)"
                         onChange={(e) =>
                           setDrafts((prev) => ({
                             ...prev,
@@ -513,58 +505,58 @@ export default function AdminProjectManager() {
                         }
                       />
                     </div>
+                  </div>
 
-                    <div>
-                      <label className="text-sm text-gray-600">Status</label>
-                      <select
-                        className={INPUT}
-                        value={d.status}
-                        onChange={(e) =>
-                          setDrafts((prev) => ({
-                            ...prev,
-                            [p.id]: { ...d, status: e.target.value },
-                          }))
-                        }
-                      >
-                        {PROJECT_STATUS_OPTIONS.map((o) => (
-                          <option key={o.value} value={o.value}>
-                            {o.label}
-                          </option>
-                        ))}
-                      </select>
+                  {/* MID: status + created */}
+                  <div className="w-[220px] shrink-0">
+                    <div className="text-xs text-gray-500">
+                      Hiện tại: <span className="font-semibold text-gray-900">{viProjectStatus(p.status)}</span>
                     </div>
+                    <select
+                      className={COMPACT_INPUT + ' mt-1'}
+                      value={d.status}
+                      onChange={(e) =>
+                        setDrafts((prev) => ({
+                          ...prev,
+                          [p.id]: { ...d, status: e.target.value },
+                        }))
+                      }
+                    >
+                      {PROJECT_STATUS_OPTIONS.map((o) => (
+                        <option key={o.value} value={o.value}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </select>
 
-                    <div className="flex items-center justify-between gap-2 flex-wrap">
-                      <div className="text-xs">
-                        {dirty ? (
-                          <span className="text-amber-700">* Có thay đổi chưa lưu</span>
-                        ) : (
-                          <span className="text-gray-500">Không có thay đổi</span>
-                        )}
-                      </div>
-
-                      <div className="flex items-center gap-2">
-                        <button
-                          className={BTN_PRIMARY}
-                          disabled={!dirty || savingId === p.id}
-                          onClick={() => updateProject(p.id)}
-                          type="button"
-                        >
-                          {savingId === p.id ? 'Đang cập nhật…' : 'Cập nhật'}
-                        </button>
-
-                        <button className={BTN_DANGER} onClick={() => deleteProject(p.id)} type="button">
-                          🗑️ Xóa
-                        </button>
-                      </div>
+                    <div className="mt-1 text-xs text-gray-600 whitespace-nowrap">
+                      {new Date(p.created_at).toLocaleString()}
                     </div>
                   </div>
+
+                  {/* RIGHT: actions */}
+                  <div className="shrink-0 flex items-center gap-2">
+                    <button
+                      className={BTN_PRIMARY}
+                      disabled={!dirty || savingId === p.id}
+                      onClick={() => updateProject(p.id)}
+                      type="button"
+                    >
+                      {savingId === p.id ? 'Đang…' : 'Lưu'}
+                    </button>
+
+                    <button className={BTN_DANGER} onClick={() => deleteProject(p.id)} type="button">
+                      🗑️
+                    </button>
+                  </div>
+
+                  {dirty && <div className="hidden xl:block text-xs text-amber-700">* Chưa lưu</div>}
                 </div>
               );
             })}
 
             {projects.length === 0 && (
-              <div className="col-span-full p-4 text-center text-gray-500 border rounded-xl bg-gray-50">
+              <div className="p-4 text-center text-gray-500 border rounded-xl bg-gray-50">
                 Không có project phù hợp bộ lọc.
               </div>
             )}
