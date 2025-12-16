@@ -14,13 +14,13 @@ import AdminCommentSummaryManager from './AdminCommentSummaryManager';
 
 export default function AdminPage() {
   const [tab, setTab] = useState<
-    'users' | 'projects' | 'rounds' | 'items' | 'invites' | 'rewards' | 'passwords'| 'analysis'| 'comments'
+    'users' | 'projects' | 'rounds' | 'items' | 'invites' | 'rewards' | 'passwords' | 'analysis' | 'comments'
   >('users');
 
   return (
     <div className="flex min-h-screen">
       {/* Sidebar */}
-      <aside className="w-60 bg-gray-100 border-r px-4 py-8">
+      <aside className="w-60 shrink-0 bg-gray-100 border-r px-4 py-8">
         <nav>
           <ul className="space-y-3">
             <li>
@@ -35,6 +35,7 @@ export default function AdminPage() {
                 👤 Người dùng
               </button>
             </li>
+
             <li>
               <button
                 className={`block w-full text-left px-3 py-2 rounded ${
@@ -47,6 +48,7 @@ export default function AdminPage() {
                 📁 Project
               </button>
             </li>
+
             <li>
               <button
                 className={`block w-full text-left px-3 py-2 rounded ${
@@ -59,6 +61,7 @@ export default function AdminPage() {
                 🔄 Round
               </button>
             </li>
+
             <li>
               <button
                 className={`block w-full text-left px-3 py-2 rounded ${
@@ -71,6 +74,7 @@ export default function AdminPage() {
                 📝 Item
               </button>
             </li>
+
             <li>
               <button
                 className={`block w-full text-left px-3 py-2 rounded ${
@@ -83,6 +87,7 @@ export default function AdminPage() {
                 ✉️ Mời khảo sát
               </button>
             </li>
+
             <li>
               <button
                 className={`block w-full text-left px-3 py-2 rounded ${
@@ -95,6 +100,7 @@ export default function AdminPage() {
                 🎁 Tài nguyên thưởng
               </button>
             </li>
+
             <li>
               <button
                 className={`block w-full text-left px-3 py-2 rounded ${
@@ -107,6 +113,7 @@ export default function AdminPage() {
                 🔒 Quản lý mật khẩu
               </button>
             </li>
+
             <li>
               <button
                 className={`block w-full text-left px-3 py-2 rounded ${
@@ -120,7 +127,6 @@ export default function AdminPage() {
               </button>
             </li>
 
-            {/* Nút mới: Tổng hợp ý kiến */}
             <li>
               <button
                 className={`block w-full text-left px-3 py-2 rounded ${
@@ -138,7 +144,7 @@ export default function AdminPage() {
       </aside>
 
       {/* Main content */}
-      <main className="flex-1 p-8 bg-white">
+      <main className="flex-1 min-w-0 p-8 bg-white">
         {tab === 'users' && <AdminUserManager />}
         {tab === 'projects' && <AdminProjectManager />}
         {tab === 'rounds' && <AdminRoundManager />}
