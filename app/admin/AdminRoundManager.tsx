@@ -19,11 +19,11 @@ type Project = { id: string; title: string; created_at?: string };
 const INPUT =
   'w-full border rounded-lg px-3 py-2 outline-none focus:border-blue-300 focus:ring-2 focus:ring-blue-200';
 const BTN_PRIMARY =
-  'inline-flex items-center px-4 py-2 rounded-lg font-semibold bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50';
+  'inline-flex items-center px-3 py-1.5 rounded-md text-xs font-medium bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50';
 const BTN_SECONDARY =
-  'inline-flex items-center px-3 py-2 rounded-lg font-semibold bg-gray-100 text-gray-800 hover:bg-gray-200 disabled:opacity-50';
+  'inline-flex items-center px-3 py-1.5 rounded-md text-xs font-medium bg-gray-100 text-gray-800 hover:bg-gray-200 disabled:opacity-50';
 const BTN_DANGER =
-  'inline-flex items-center px-3 py-2 rounded-lg font-semibold bg-red-600 text-white hover:bg-red-700 disabled:opacity-50';
+  'inline-flex items-center px-3 py-1.5 rounded-md text-xs font-medium bg-red-600 text-white hover:bg-red-700 disabled:opacity-50';
 
 const ROUND_PAGE_SIZE = 10;
 const PROJECT_PICKER_PAGE_SIZE = 10;
@@ -847,10 +847,10 @@ export default function AdminRoundManager() {
 
                   <div className="shrink-0 flex items-center gap-2">
                     <button type="button" className={BTN_SECONDARY} onClick={() => openEditModal(r.id)}>
-                      ✏️ Sửa
+                      Sửa
                     </button>
                     <button type="button" className={BTN_DANGER} onClick={() => deleteRound(r.id)}>
-                      🗑️ Xóa
+                      Xóa
                     </button>
                   </div>
                 </div>
@@ -904,7 +904,7 @@ export default function AdminRoundManager() {
               </div>
 
               <button type="button" className={BTN_SECONDARY} onClick={closeEditModal}>
-                ✕ Đóng
+                Đóng
               </button>
             </div>
 
