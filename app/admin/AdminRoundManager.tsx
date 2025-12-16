@@ -14,7 +14,7 @@ type Round = {
   created_at: string;
 };
 
-type Project = { id: string; title: string };
+type Project = { id: string; title: string; created_at?: string };
 
 const INPUT =
   'w-full border rounded-lg px-3 py-2 outline-none focus:border-blue-300 focus:ring-2 focus:ring-blue-200';
@@ -25,7 +25,8 @@ const BTN_SECONDARY =
 const BTN_DANGER =
   'inline-flex items-center px-3 py-2 rounded-lg font-semibold bg-red-600 text-white hover:bg-red-700 disabled:opacity-50';
 
-const PAGE_SIZE = 50;
+const ROUND_PAGE_SIZE = 10;
+const PROJECT_PICKER_PAGE_SIZE = 10;
 
 const ROUND_STATUS_OPTIONS = [
   { value: 'draft', label: 'Bản nháp' },
@@ -81,38 +82,49 @@ export default function AdminRoundManager() {
   // ===== DATA =====
   const [projects, setProjects] = useState<Project[]>([]);
   const [rounds, setRounds] = useState<Round[]>([]);
-  const [total, setTotal] = useState(0);
+  const [roundTotal, setRoundTotal] = useState(0);
 
   // ===== UI =====
-  const [loading, setLoading] = useState(true);
+  const [loadingRounds, setLoadingRounds] = useState(true);
+  const [loadingProjects, setLoadingProjects] = useState(true);
   const [message, setMessage] = useState('');
 
-  // ===== PAGINATION =====
-  const [page, setPage] = useState(1);
-  const totalPages = useMemo(() => Math.max(1, Math.ceil(total / PAGE_SIZE)), [total]);
+  // ===== PAGINATION (ROUND LIST) =====
+  const [roundPage, setRoundPage] = useState(1);
+  const roundTotalPages = useMemo(
+    () => Math.max(1, Math.ceil(roundTotal / ROUND_PAGE_SIZE)),
+    [roundTotal]
+  );
+
+  // ===== FILTERS (ROUND LIST) =====
+  const [filterProjectId, setFilterProjectId] = useState<string>('');
+  const [filterStatus, setFilterStatus] = useState<string>('');
+  const [roundDateFrom, setRoundDateFrom] = useState<string>(''); // created_at from
+  const [roundDateTo, setRoundDateTo] = useState<string>(''); // created_at to
 
   // ===== CREATE (multi-project) =====
-  const [selectedProjectIds, setSelectedProjectIds] = useState<Set<string>>(() => new Set());
+  const [selectedProjectIds, setSelectedProjectIds] = useState<Set<string>>(
+    () => new Set()
+  );
   const [autoNumber, setAutoNumber] = useState(true);
   const [manualNumber, setManualNumber] = useState(1);
-  const [createStatus, setCreateStatus] =
-    useState<(typeof ROUND_STATUS_OPTIONS)[number]['value']>('active');
-  const [createDescription, setCreateDescription] = useState('');
+
+  // mặc định draft, không hiển thị dropdown
+  const CREATE_DEFAULT_STATUS: 'draft' = 'draft';
+
+  // open_at + close_at cùng 1 hàng
   const [createOpenAt, setCreateOpenAt] = useState<string>(''); // datetime-local
   const [createCloseAt, setCreateCloseAt] = useState<string>(''); // datetime-local
+  const [createDescription, setCreateDescription] = useState('');
   const [creating, setCreating] = useState(false);
 
-  // ===== FILTERS (LIST) =====
-  const [filterProjectId, setFilterProjectId] = useState<string>(''); // NEW
-  const [filterStatus, setFilterStatus] = useState<string>(''); // '' all
-  const [dateFrom, setDateFrom] = useState<string>(''); // YYYY-MM-DD
-  const [dateTo, setDateTo] = useState<string>(''); // YYYY-MM-DD
+  // ===== PROJECT PICKER (CREATE) FILTER + PAGINATION =====
+  const [projectSearch, setProjectSearch] = useState<string>('');
+  const [projectCreatedFrom, setProjectCreatedFrom] = useState<string>(''); // YYYY-MM-DD
+  const [projectCreatedTo, setProjectCreatedTo] = useState<string>(''); // YYYY-MM-DD
+  const [projectPage, setProjectPage] = useState(1);
 
-  // ===== FILTERS (CREATE PROJECT PICKER) =====
-  const [createProjectFilterId, setCreateProjectFilterId] = useState<string>(''); // NEW
-  const [createProjectSearch, setCreateProjectSearch] = useState<string>(''); // NEW
-
-  // ===== INLINE EDIT =====
+  // ===== INLINE EDIT (ROUND LIST) =====
   const [drafts, setDrafts] = useState<
     Record<
       string,
@@ -127,6 +139,14 @@ export default function AdminRoundManager() {
   >({});
   const [savingId, setSavingId] = useState('');
 
+  // ===== helpers =====
+  const projectTitleById = useMemo(() => {
+    const m = new Map<string, string>();
+    projects.forEach((p) => m.set(p.id, p.title));
+    return m;
+  }, [projects]);
+
+  // ===== LOAD =====
   useEffect(() => {
     loadProjects();
     loadRounds(1);
@@ -136,55 +156,67 @@ export default function AdminRoundManager() {
   useEffect(() => {
     loadRounds(1);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filterProjectId, filterStatus, dateFrom, dateTo]);
+  }, [filterProjectId, filterStatus, roundDateFrom, roundDateTo]);
+
+  // reset project picker page when filter changes
+  useEffect(() => {
+    setProjectPage(1);
+  }, [projectSearch, projectCreatedFrom, projectCreatedTo]);
 
   async function loadProjects() {
+    setLoadingProjects(true);
+    setMessage('');
+
     const { data, error } = await supabase
       .from('projects')
-      .select('id, title')
+      .select('id, title, created_at')
       .order('created_at', { ascending: false });
 
     if (error) {
-      setMessage('❌ Lỗi tải projects: ' + error.message);
       setProjects([]);
+      setMessage('❌ Lỗi tải projects: ' + error.message);
+      setLoadingProjects(false);
       return;
     }
+
     setProjects((data as Project[]) ?? []);
+    setLoadingProjects(false);
   }
 
   async function loadRounds(nextPage: number) {
-    setLoading(true);
+    setLoadingRounds(true);
     setMessage('');
 
-    const from = (nextPage - 1) * PAGE_SIZE;
-    const to = from + PAGE_SIZE - 1;
+    const from = (nextPage - 1) * ROUND_PAGE_SIZE;
+    const to = from + ROUND_PAGE_SIZE - 1;
 
     let q = supabase
       .from('rounds')
-      .select('id, project_id, round_number, status, description, open_at, close_at, created_at', {
-        count: 'exact',
-      })
+      .select(
+        'id, project_id, round_number, status, description, open_at, close_at, created_at',
+        { count: 'exact' }
+      )
       .order('created_at', { ascending: false });
 
     if (filterProjectId) q = q.eq('project_id', filterProjectId);
     if (filterStatus) q = q.eq('status', filterStatus);
-    if (dateFrom) q = q.gte('created_at', toStartOfDayISO(dateFrom));
-    if (dateTo) q = q.lt('created_at', toNextDayStartISO(dateTo));
+    if (roundDateFrom) q = q.gte('created_at', toStartOfDayISO(roundDateFrom));
+    if (roundDateTo) q = q.lt('created_at', toNextDayStartISO(roundDateTo));
 
     const { data, error, count } = await q.range(from, to);
 
     if (error) {
       setRounds([]);
-      setTotal(0);
+      setRoundTotal(0);
       setMessage('❌ Lỗi tải rounds: ' + error.message);
-      setLoading(false);
+      setLoadingRounds(false);
       return;
     }
 
     const rows = (data as Round[]) ?? [];
     setRounds(rows);
-    setTotal(count ?? 0);
-    setPage(nextPage);
+    setRoundTotal(count ?? 0);
+    setRoundPage(nextPage);
 
     // init drafts
     setDrafts((prev) => {
@@ -203,15 +235,38 @@ export default function AdminRoundManager() {
       return next;
     });
 
-    setLoading(false);
+    setLoadingRounds(false);
   }
 
-  // ===== helpers =====
-  const projectTitleById = useMemo(() => {
-    const m = new Map<string, string>();
-    projects.forEach((p) => m.set(p.id, p.title));
-    return m;
-  }, [projects]);
+  // ===== Project picker derived list (filter by name + created_at) =====
+  const filteredProjects = useMemo(() => {
+    let list = projects;
+
+    const kw = projectSearch.trim().toLowerCase();
+    if (kw) {
+      list = list.filter((p) => p.title.toLowerCase().includes(kw));
+    }
+
+    if (projectCreatedFrom) {
+      const fromISO = toStartOfDayISO(projectCreatedFrom);
+      list = list.filter((p) => (p.created_at ? p.created_at >= fromISO : true));
+    }
+    if (projectCreatedTo) {
+      const toISO = toNextDayStartISO(projectCreatedTo);
+      list = list.filter((p) => (p.created_at ? p.created_at < toISO : true));
+    }
+
+    return list;
+  }, [projects, projectSearch, projectCreatedFrom, projectCreatedTo]);
+
+  const projectTotalPages = useMemo(() => {
+    return Math.max(1, Math.ceil(filteredProjects.length / PROJECT_PICKER_PAGE_SIZE));
+  }, [filteredProjects.length]);
+
+  const projectPageItems = useMemo(() => {
+    const start = (projectPage - 1) * PROJECT_PICKER_PAGE_SIZE;
+    return filteredProjects.slice(start, start + PROJECT_PICKER_PAGE_SIZE);
+  }, [filteredProjects, projectPage]);
 
   function toggleProject(id: string) {
     setSelectedProjectIds((prev) => {
@@ -228,7 +283,7 @@ export default function AdminRoundManager() {
 
   function toggleSelectAllVisibleProjects(visible: Project[]) {
     setSelectedProjectIds((prev) => {
-      const allVisibleSelected = visible.every((p) => prev.has(p.id));
+      const allVisibleSelected = visible.length > 0 && visible.every((p) => prev.has(p.id));
       const next = new Set(prev);
 
       if (allVisibleSelected) {
@@ -240,22 +295,6 @@ export default function AdminRoundManager() {
     });
   }
 
-  // ===== visible projects in CREATE picker (filter + search) =====
-  const createVisibleProjects = useMemo(() => {
-    let list = projects;
-
-    if (createProjectFilterId) {
-      list = list.filter((p) => p.id === createProjectFilterId);
-    }
-
-    const kw = createProjectSearch.trim().toLowerCase();
-    if (kw) {
-      list = list.filter((p) => p.title.toLowerCase().includes(kw));
-    }
-
-    return list;
-  }, [projects, createProjectFilterId, createProjectSearch]);
-
   // ===== CREATE multi =====
   async function createRoundsForSelectedProjects() {
     setMessage('');
@@ -266,8 +305,8 @@ export default function AdminRoundManager() {
 
     const ok = window.confirm(
       autoNumber
-        ? `Tạo round cho ${selectedProjectIds.size} project (số vòng tự động: max+1 theo từng project)?`
-        : `Tạo round #${manualNumber} cho ${selectedProjectIds.size} project?`
+        ? `Tạo round cho ${selectedProjectIds.size} project (số vòng tự động: max+1 theo từng project)? Trạng thái mặc định: Bản nháp.`
+        : `Tạo round #${manualNumber} cho ${selectedProjectIds.size} project? Trạng thái mặc định: Bản nháp.`
     );
     if (!ok) return;
 
@@ -319,7 +358,7 @@ export default function AdminRoundManager() {
       const inserts = selectedIds.map((pid) => ({
         project_id: pid,
         round_number: nextNumberByProject.get(pid) ?? 1,
-        status: createStatus,
+        status: CREATE_DEFAULT_STATUS, // draft
         description: createDescription.trim() ? createDescription.trim() : null,
         open_at,
         close_at,
@@ -328,7 +367,7 @@ export default function AdminRoundManager() {
       const { error } = await supabase.from('rounds').insert(inserts);
       if (error) throw error;
 
-      setMessage(`✅ Đã tạo round cho ${selectedIds.length} project.`);
+      setMessage(`✅ Đã tạo round (Bản nháp) cho ${selectedIds.length} project.`);
       setCreateDescription('');
       setCreateOpenAt('');
       setCreateCloseAt('');
@@ -360,7 +399,7 @@ export default function AdminRoundManager() {
       if (error) throw error;
 
       setMessage('✅ Đã cập nhật round!');
-      await loadRounds(page);
+      await loadRounds(roundPage);
     } catch (e: any) {
       setMessage('❌ Lỗi cập nhật: ' + (e?.message ?? String(e)));
     } finally {
@@ -377,7 +416,7 @@ export default function AdminRoundManager() {
     if (error) setMessage('❌ Lỗi xóa: ' + error.message);
     else setMessage('🗑️ Đã xóa round!');
 
-    const nextPage = page > 1 && rounds.length === 1 ? page - 1 : page;
+    const nextPage = roundPage > 1 && rounds.length === 1 ? roundPage - 1 : roundPage;
     await loadRounds(nextPage);
   }
 
@@ -386,7 +425,7 @@ export default function AdminRoundManager() {
       <header className="flex items-center justify-between flex-wrap gap-3">
         <h2 className="text-2xl font-bold">🔄 Quản lý Round</h2>
         <div className="text-sm text-gray-600">
-          {loading ? 'Đang tải…' : `Tổng: ${total} | Trang ${page}/${totalPages}`}
+          {loadingRounds ? 'Đang tải…' : `Tổng: ${roundTotal} | Trang ${roundPage}/${roundTotalPages}`}
         </div>
       </header>
 
@@ -398,31 +437,35 @@ export default function AdminRoundManager() {
       <section className="bg-white border rounded-2xl p-5 space-y-4 shadow-sm">
         <h3 className="font-semibold text-lg">➕ Tạo Round (chọn nhiều Project)</h3>
 
-        {/* Filters for project picker */}
+        {/* search + project created date filter */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          <div>
-            <label className="text-sm text-gray-600">Lọc nhanh theo Project</label>
-            <select
-              className={INPUT}
-              value={createProjectFilterId}
-              onChange={(e) => setCreateProjectFilterId(e.target.value)}
-            >
-              <option value="">— Tất cả Project —</option>
-              {projects.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.title}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className="md:col-span-2">
+          <div className="md:col-span-1">
             <label className="text-sm text-gray-600">Tìm project theo tên</label>
             <input
               className={INPUT}
-              placeholder="Gõ để lọc danh sách project…"
-              value={createProjectSearch}
-              onChange={(e) => setCreateProjectSearch(e.target.value)}
+              placeholder="Gõ để lọc theo tên project…"
+              value={projectSearch}
+              onChange={(e) => setProjectSearch(e.target.value)}
+            />
+          </div>
+
+          <div>
+            <label className="text-sm text-gray-600">Ngày tạo project từ</label>
+            <input
+              className={INPUT}
+              type="date"
+              value={projectCreatedFrom}
+              onChange={(e) => setProjectCreatedFrom(e.target.value)}
+            />
+          </div>
+
+          <div>
+            <label className="text-sm text-gray-600">Ngày tạo project đến</label>
+            <input
+              className={INPUT}
+              type="date"
+              value={projectCreatedTo}
+              onChange={(e) => setProjectCreatedTo(e.target.value)}
             />
           </div>
         </div>
@@ -436,10 +479,10 @@ export default function AdminRoundManager() {
             <button
               type="button"
               className={BTN_SECONDARY}
-              onClick={() => toggleSelectAllVisibleProjects(createVisibleProjects)}
-              disabled={createVisibleProjects.length === 0}
+              onClick={() => toggleSelectAllVisibleProjects(projectPageItems)}
+              disabled={projectPageItems.length === 0}
             >
-              Chọn/Bỏ chọn (theo danh sách đang lọc)
+              Chọn/Bỏ chọn (trang project này)
             </button>
             <button
               type="button"
@@ -452,31 +495,59 @@ export default function AdminRoundManager() {
           </div>
         </div>
 
-        {/* Project checklist */}
-        <div className="max-h-60 overflow-auto border rounded-xl p-3 bg-gray-50">
-          {createVisibleProjects.length === 0 ? (
+        {/* Project checklist (10 items/page) */}
+        <div className="border rounded-xl p-3 bg-gray-50">
+          {loadingProjects ? (
+            <div className="text-sm text-gray-500">Đang tải project…</div>
+          ) : filteredProjects.length === 0 ? (
             <div className="text-sm text-gray-500">Không có project phù hợp bộ lọc.</div>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-              {createVisibleProjects.map((p) => {
-                const checked = selectedProjectIds.has(p.id);
-                return (
-                  <label
-                    key={p.id}
-                    className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-white"
+            <>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                {projectPageItems.map((p) => {
+                  const checked = selectedProjectIds.has(p.id);
+                  return (
+                    <label
+                      key={p.id}
+                      className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-white"
+                    >
+                      <input type="checkbox" checked={checked} onChange={() => toggleProject(p.id)} />
+                      <span className="text-sm">{p.title}</span>
+                    </label>
+                  );
+                })}
+              </div>
+
+              <div className="flex items-center justify-between mt-3 text-sm text-gray-700">
+                <div>
+                  Tổng: <b>{filteredProjects.length}</b> | Trang <b>{projectPage}</b>/{projectTotalPages}
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    className={BTN_SECONDARY}
+                    type="button"
+                    disabled={projectPage <= 1}
+                    onClick={() => setProjectPage((p) => Math.max(1, p - 1))}
                   >
-                    <input type="checkbox" checked={checked} onChange={() => toggleProject(p.id)} />
-                    <span className="text-sm">{p.title}</span>
-                  </label>
-                );
-              })}
-            </div>
+                    ◀ Trước
+                  </button>
+                  <button
+                    className={BTN_SECONDARY}
+                    type="button"
+                    disabled={projectPage >= projectTotalPages}
+                    onClick={() => setProjectPage((p) => Math.min(projectTotalPages, p + 1))}
+                  >
+                    Sau ▶
+                  </button>
+                </div>
+              </div>
+            </>
           )}
         </div>
 
         {/* Create options */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div className="space-y-3">
+          <div className="space-y-2">
             <label className="flex items-center gap-2 text-sm">
               <input
                 type="checkbox"
@@ -499,23 +570,13 @@ export default function AdminRoundManager() {
               </div>
             )}
 
-            <div>
-              <label className="text-sm text-gray-600">Trạng thái</label>
-              <select
-                className={INPUT}
-                value={createStatus}
-                onChange={(e) => setCreateStatus(e.target.value as any)}
-              >
-                {ROUND_STATUS_OPTIONS.map((o) => (
-                  <option key={o.value} value={o.value}>
-                    {o.label}
-                  </option>
-                ))}
-              </select>
+            <div className="text-sm text-gray-700">
+              Trạng thái mặc định: <b>Bản nháp</b>
             </div>
           </div>
 
-          <div className="space-y-3">
+          {/* open_at + close_at cùng 1 hàng */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <div>
               <label className="text-sm text-gray-600">Ngày mở (open_at) (tuỳ chọn)</label>
               <input
@@ -558,7 +619,7 @@ export default function AdminRoundManager() {
         </button>
       </section>
 
-      {/* ===== FILTERS (LIST) ===== */}
+      {/* ===== FILTERS (ROUND LIST) ===== */}
       <section className="bg-white border rounded-2xl p-5 space-y-3 shadow-sm">
         <h3 className="font-semibold text-lg">🔎 Bộ lọc danh sách Round</h3>
 
@@ -581,7 +642,11 @@ export default function AdminRoundManager() {
 
           <div>
             <label className="text-sm text-gray-600">Trạng thái</label>
-            <select className={INPUT} value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}>
+            <select
+              className={INPUT}
+              value={filterStatus}
+              onChange={(e) => setFilterStatus(e.target.value)}
+            >
               <option value="">— Tất cả —</option>
               {ROUND_STATUS_OPTIONS.map((o) => (
                 <option key={o.value} value={o.value}>
@@ -593,12 +658,22 @@ export default function AdminRoundManager() {
 
           <div>
             <label className="text-sm text-gray-600">Ngày tạo từ</label>
-            <input className={INPUT} type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
+            <input
+              className={INPUT}
+              type="date"
+              value={roundDateFrom}
+              onChange={(e) => setRoundDateFrom(e.target.value)}
+            />
           </div>
 
           <div>
             <label className="text-sm text-gray-600">Ngày tạo đến</label>
-            <input className={INPUT} type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
+            <input
+              className={INPUT}
+              type="date"
+              value={roundDateTo}
+              onChange={(e) => setRoundDateTo(e.target.value)}
+            />
           </div>
 
           <div className="md:col-span-4 flex gap-2">
@@ -608,8 +683,8 @@ export default function AdminRoundManager() {
               onClick={() => {
                 setFilterProjectId('');
                 setFilterStatus('');
-                setDateFrom('');
-                setDateTo('');
+                setRoundDateFrom('');
+                setRoundDateTo('');
               }}
             >
               Reset lọc
@@ -618,7 +693,7 @@ export default function AdminRoundManager() {
         </div>
       </section>
 
-      {/* ===== LIST ===== */}
+      {/* ===== ROUND LIST ===== */}
       <section className="bg-white border rounded-2xl p-5 space-y-3 shadow-sm">
         <div className="flex items-center justify-between flex-wrap gap-3">
           <h3 className="font-semibold text-lg">📋 Danh sách Round</h3>
@@ -626,16 +701,16 @@ export default function AdminRoundManager() {
           <div className="flex items-center gap-2">
             <button
               className={BTN_SECONDARY}
-              disabled={page <= 1 || loading}
-              onClick={() => loadRounds(page - 1)}
+              disabled={roundPage <= 1 || loadingRounds}
+              onClick={() => loadRounds(roundPage - 1)}
               type="button"
             >
               ◀ Trang trước
             </button>
             <button
               className={BTN_SECONDARY}
-              disabled={page >= totalPages || loading}
-              onClick={() => loadRounds(page + 1)}
+              disabled={roundPage >= roundTotalPages || loadingRounds}
+              onClick={() => loadRounds(roundPage + 1)}
               type="button"
             >
               Trang sau ▶
@@ -643,7 +718,7 @@ export default function AdminRoundManager() {
           </div>
         </div>
 
-        {loading ? (
+        {loadingRounds ? (
           <div>Đang tải...</div>
         ) : (
           <div className="overflow-x-auto">
@@ -681,9 +756,11 @@ export default function AdminRoundManager() {
 
                   return (
                     <tr key={r.id} className="border-t align-top">
-                      <td className="p-2 border min-w-[260px]">
-                        <div className="font-medium">{projectTitleById.get(r.project_id) ?? r.project_id}</div>
-                        <div className="text-xs text-gray-500 font-mono">{r.project_id}</div>
+                      {/* Project: chỉ tên, không show id */}
+                      <td className="p-2 border min-w-[240px]">
+                        <div className="font-medium">
+                          {projectTitleById.get(r.project_id) ?? '(Không rõ project)'}
+                        </div>
                       </td>
 
                       <td className="p-2 border min-w-[110px]">
@@ -703,7 +780,11 @@ export default function AdminRoundManager() {
 
                       <td className="p-2 border min-w-[200px]">
                         <div className="mb-2">
-                          <span className={`inline-flex px-2 py-0.5 rounded text-xs font-semibold ${statusPillClass(r.status)}`}>
+                          <span
+                            className={`inline-flex px-2 py-0.5 rounded text-xs font-semibold ${statusPillClass(
+                              r.status
+                            )}`}
+                          >
                             {viRoundStatus(r.status)}
                           </span>
                         </div>
@@ -724,6 +805,8 @@ export default function AdminRoundManager() {
                             </option>
                           ))}
                         </select>
+
+                        {dirty && <div className="text-xs text-amber-700 mt-1">* Có thay đổi chưa lưu</div>}
                       </td>
 
                       <td className="p-2 border min-w-[210px]">
@@ -754,7 +837,7 @@ export default function AdminRoundManager() {
                         />
                       </td>
 
-                      <td className="p-2 border min-w-[340px]">
+                      <td className="p-2 border min-w-[320px]">
                         <textarea
                           className={INPUT}
                           rows={2}
@@ -766,7 +849,6 @@ export default function AdminRoundManager() {
                             }))
                           }
                         />
-                        {dirty && <div className="text-xs text-amber-700 mt-1">* Có thay đổi chưa lưu</div>}
                       </td>
 
                       <td className="p-2 border whitespace-nowrap text-gray-700">
@@ -802,6 +884,30 @@ export default function AdminRoundManager() {
                 )}
               </tbody>
             </table>
+
+            <div className="mt-3 flex items-center justify-between text-sm text-gray-700">
+              <div>
+                Tổng: <b>{roundTotal}</b> | Trang <b>{roundPage}</b>/{roundTotalPages}
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  className={BTN_SECONDARY}
+                  disabled={roundPage <= 1}
+                  onClick={() => loadRounds(roundPage - 1)}
+                  type="button"
+                >
+                  ◀ Trang trước
+                </button>
+                <button
+                  className={BTN_SECONDARY}
+                  disabled={roundPage >= roundTotalPages}
+                  onClick={() => loadRounds(roundPage + 1)}
+                  type="button"
+                >
+                  Trang sau ▶
+                </button>
+              </div>
+            </div>
           </div>
         )}
       </section>
