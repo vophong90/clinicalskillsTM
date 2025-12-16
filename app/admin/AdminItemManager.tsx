@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 import Papa from 'papaparse';
 
@@ -45,12 +45,141 @@ function chunkArray<T>(arr: T[], size: number) {
   return out;
 }
 
+function normalizeText(s: string) {
+  return (s ?? '')
+    .normalize('NFC')
+    .toLowerCase()
+    .replaceAll('（', '(')
+    .replaceAll('）', ')')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function includesLoose(haystack: string, needle: string) {
+  const h = normalizeText(haystack);
+  const n = normalizeText(needle);
+  if (!n) return true;
+  return h.includes(n) || h.includes('(' + n);
+}
+
+function truncate(s: string, max = 180) {
+  const t = (s ?? '').trim();
+  if (t.length <= max) return t;
+  return t.slice(0, max - 1) + '…';
+}
+
+/** ===== Searchable Project Combobox ===== */
+function ProjectCombobox({
+  projects,
+  valueId,
+  onChange,
+  placeholder = 'Gõ để tìm project…',
+  disabled = false,
+  className = 'min-w-72',
+}: {
+  projects: Project[];
+  valueId: string;
+  onChange: (nextId: string) => void;
+  placeholder?: string;
+  disabled?: boolean;
+  className?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const wrapRef = useRef<HTMLDivElement | null>(null);
+
+  const selected = useMemo(() => projects.find((p) => p.id === valueId) ?? null, [projects, valueId]);
+
+  useEffect(() => {
+    // khi valueId đổi (chọn từ ngoài), set lại text theo title
+    if (selected) setQuery(selected.title);
+    if (!valueId) setQuery('');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [valueId]);
+
+  const filtered = useMemo(() => {
+    const q = query.trim();
+    if (!q) return projects.slice(0, 30);
+    return projects.filter((p) => includesLoose(p.title, q)).slice(0, 30);
+  }, [projects, query]);
+
+  useEffect(() => {
+    const onDoc = (e: MouseEvent) => {
+      if (!wrapRef.current) return;
+      if (!wrapRef.current.contains(e.target as any)) setOpen(false);
+    };
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, []);
+
+  return (
+    <div ref={wrapRef} className={`relative ${className}`}>
+      <div className="flex items-center gap-2">
+        <input
+          disabled={disabled}
+          className="border p-2 rounded w-full"
+          placeholder={placeholder}
+          value={query}
+          onChange={(e) => {
+            setQuery(e.target.value);
+            if (!open) setOpen(true);
+            // nếu user gõ khác title đã chọn => coi như chưa chọn
+            if (valueId) onChange('');
+          }}
+          onFocus={() => setOpen(true)}
+        />
+        <button
+          type="button"
+          className="px-2 py-2 rounded border bg-white hover:bg-gray-50 disabled:opacity-50"
+          disabled={disabled || (!valueId && !query)}
+          title="Xóa chọn"
+          onClick={() => {
+            setQuery('');
+            onChange('');
+            setOpen(false);
+          }}
+        >
+          ✕
+        </button>
+      </div>
+
+      {open && !disabled && (
+        <div className="absolute z-50 mt-1 w-full rounded border bg-white shadow max-h-72 overflow-auto">
+          {filtered.length === 0 ? (
+            <div className="p-2 text-sm text-gray-500">Không có project phù hợp.</div>
+          ) : (
+            filtered.map((p) => {
+              const active = p.id === valueId;
+              return (
+                <button
+                  key={p.id}
+                  type="button"
+                  className={`w-full text-left px-3 py-2 text-sm hover:bg-gray-50 ${
+                    active ? 'bg-blue-50' : ''
+                  }`}
+                  onClick={() => {
+                    onChange(p.id);
+                    setQuery(p.title);
+                    setOpen(false);
+                  }}
+                >
+                  {p.title}
+                </button>
+              );
+            })
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function AdminItemManager() {
   const [items, setItems] = useState<Item[]>([]);
   const [rounds, setRounds] = useState<Round[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
-  const [projectId, setProjectId] = useState<string>('');
-  const [roundId, setRoundId] = useState<string>('');
+  const [projectId, setProjectId] = useState<string>(''); // filter
+  const [roundId, setRoundId] = useState<string>(''); // filter
   const [message, setMessage] = useState<string>('');
   const [loading, setLoading] = useState<boolean>(true);
 
@@ -216,7 +345,6 @@ export default function AdminItemManager() {
   }, [sortedItems, pageSafe]);
 
   useEffect(() => {
-    // nếu totalPages giảm, kéo page về hợp lệ
     if (page !== pageSafe) setPage(pageSafe);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [totalPages]);
@@ -241,15 +369,6 @@ export default function AdminItemManager() {
       else ids.forEach((id) => next.add(id));
       return next;
     });
-  }
-
-  function handleSort(key: SortKey) {
-    if (sortBy === key) {
-      setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
-    } else {
-      setSortBy(key);
-      setSortDir('asc');
-    }
   }
 
   async function bulkDeleteSelected() {
@@ -339,21 +458,6 @@ export default function AdminItemManager() {
     setLoading(false);
   }
 
-  const SortHeader: React.FC<{ label: string; k: SortKey; className?: string }> = ({ label, k, className }) => {
-    const active = sortBy === k;
-    const arrow = active ? (sortDir === 'asc' ? '▲' : '▼') : '↕';
-    return (
-      <button
-        type="button"
-        className={`flex items-center gap-1 font-semibold ${className ?? ''}`}
-        onClick={() => handleSort(k)}
-        title={`Sắp xếp theo ${label}`}
-      >
-        {label} <span className="text-gray-500">{arrow}</span>
-      </button>
-    );
-  };
-
   // ===== CSV import (PapaParse) =====
   function resetCsvState() {
     setCsvFileName('');
@@ -384,6 +488,7 @@ export default function AdminItemManager() {
       header: true,
       skipEmptyLines: true,
       dynamicTyping: false,
+      // PapaParse sẽ handle dấu phẩy trong prompt nếu CSV đúng chuẩn (quote)
     });
 
     if (parsed.errors?.length) {
@@ -396,10 +501,6 @@ export default function AdminItemManager() {
     const rows = (parsed.data ?? []).filter((r) => r && Object.keys(r).length > 0);
     setCsvParsedCount(rows.length);
 
-    // required columns
-    // PapaParse header: true => keys from header row.
-    // user required: code, prompt, type, option_json, item_order
-    // We'll validate at row level.
     const errs: string[] = [];
     const toInsert: Array<{
       project_id: string;
@@ -412,7 +513,7 @@ export default function AdminItemManager() {
     }> = [];
 
     rows.forEach((r, idx) => {
-      const lineNo = idx + 2; // roughly, for user reference
+      const lineNo = idx + 2;
       const code = safeTrim((r as any).code);
       const prompt = safeTrim((r as any).prompt);
       const type = safeTrim((r as any).type) || 'likert';
@@ -521,7 +622,6 @@ export default function AdminItemManager() {
     setEditType(item.type ?? 'likert');
     setEditItemOrder(item.item_order == null ? '' : String(item.item_order));
 
-    // stringify options_json
     try {
       setEditOptionsJsonText(item.options_json == null ? '' : JSON.stringify(item.options_json, null, 2));
     } catch {
@@ -551,7 +651,6 @@ export default function AdminItemManager() {
       return;
     }
 
-    // validate options_json text
     let options_json: any = null;
     const raw = editOptionsJsonText.trim();
     if (raw) {
@@ -645,23 +744,19 @@ export default function AdminItemManager() {
 
         <div className="flex flex-wrap items-end gap-2">
           <div className="flex flex-col gap-1">
-            <label className="text-xs text-gray-600">Chọn Project</label>
-            <select
-              className="border p-2 rounded min-w-64"
-              value={csvProjectId}
-              onChange={(e) => {
-                setCsvProjectId(e.target.value);
+            <label className="text-xs text-gray-600">Chọn Project (gõ để tìm)</label>
+            <ProjectCombobox
+              projects={projects}
+              valueId={csvProjectId}
+              onChange={(nextId) => {
+                setCsvProjectId(nextId);
                 setCsvRoundId('');
                 resetCsvState();
               }}
-            >
-              <option value="">— Chọn Project —</option>
-              {projects.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.title}
-                </option>
-              ))}
-            </select>
+              placeholder="Gõ từ khóa project…"
+              className="min-w-80"
+              disabled={loading}
+            />
           </div>
 
           <div className="flex flex-col gap-1">
@@ -738,36 +833,68 @@ export default function AdminItemManager() {
       </section>
 
       {/* BỘ LỌC + MENU CHUNG */}
-      <div className="mb-4 flex flex-wrap items-center gap-2 border p-3 rounded bg-gray-50">
-        <select
-          className="border p-2 rounded min-w-48"
-          value={projectId}
-          onChange={(e) => {
-            setProjectId(e.target.value);
-            setRoundId('');
-          }}
-        >
-          <option value="">— Lọc theo Project —</option>
-          {projects.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.title}
-            </option>
-          ))}
-        </select>
+      <div className="mb-4 flex flex-wrap items-end gap-2 border p-3 rounded bg-gray-50">
+        <div className="flex flex-col gap-1">
+          <label className="text-xs text-gray-600">Lọc theo Project (gõ để tìm)</label>
+          <ProjectCombobox
+            projects={projects}
+            valueId={projectId}
+            onChange={(nextId) => {
+              setProjectId(nextId);
+              setRoundId('');
+            }}
+            placeholder="Gõ từ khóa project để lọc…"
+            className="min-w-80"
+            disabled={loading}
+          />
+        </div>
 
-        <select className="border p-2 rounded min-w-48" value={roundId} onChange={(e) => setRoundId(e.target.value)}>
-          <option value="">— Lọc theo Vòng —</option>
-          {filteredRounds
-            .slice()
-            .sort((a, b) => a.round_number - b.round_number)
-            .map((r) => (
-              <option key={r.id} value={r.id}>
-                {(projects.find((p) => p.id === r.project_id)?.title ?? 'Project')} – Vòng {r.round_number}
-              </option>
-            ))}
-        </select>
+        <div className="flex flex-col gap-1">
+          <label className="text-xs text-gray-600">Lọc theo Round</label>
+          <select
+            className="border p-2 rounded min-w-64"
+            value={roundId}
+            onChange={(e) => setRoundId(e.target.value)}
+            disabled={!!projectId && filteredRounds.length === 0}
+          >
+            <option value="">— Lọc theo Vòng —</option>
+            {filteredRounds
+              .slice()
+              .sort((a, b) => a.round_number - b.round_number)
+              .map((r) => (
+                <option key={r.id} value={r.id}>
+                  {(projects.find((p) => p.id === r.project_id)?.title ?? 'Project')} – Vòng {r.round_number}
+                </option>
+              ))}
+          </select>
+        </div>
 
         <div className="flex-1" />
+
+        {/* sort controls (giữ tối giản) */}
+        <div className="flex items-center gap-2">
+          <select
+            className="border p-2 rounded"
+            value={sortBy}
+            onChange={(e) => setSortBy(e.target.value as SortKey)}
+            title="Sắp xếp theo"
+          >
+            <option value="item_order">Thứ tự</option>
+            <option value="prompt">Prompt</option>
+            <option value="code">Code</option>
+            <option value="project">Project</option>
+            <option value="round">Round</option>
+            <option value="type">Type</option>
+          </select>
+          <button
+            type="button"
+            className="px-3 py-2 rounded border bg-white hover:bg-gray-50"
+            onClick={() => setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))}
+            title="Đổi chiều sắp xếp"
+          >
+            {sortDir === 'asc' ? '▲' : '▼'}
+          </button>
+        </div>
 
         <button
           className="px-3 py-2 rounded bg-green-600 text-white disabled:opacity-50"
@@ -811,88 +938,102 @@ export default function AdminItemManager() {
         </div>
       </div>
 
-      {/* BẢNG */}
-      {loading ? (
-        <div>Đang tải...</div>
-      ) : (
-        <table className="min-w-full border text-sm bg-white shadow">
-          <thead>
-            <tr className="bg-gray-100">
-              <th className="p-2 w-10 text-center">
-                <input type="checkbox" checked={allVisibleSelected} onChange={toggleSelectAllVisible} aria-label="Chọn tất cả trang này" />
-              </th>
-              <th className="p-2">
-                <SortHeader label="Thứ tự" k="item_order" />
-              </th>
-              <th className="p-2">
-                <SortHeader label="Nội dung (prompt)" k="prompt" />
-              </th>
-              <th className="p-2">
-                <SortHeader label="Code" k="code" />
-              </th>
-              <th className="p-2">
-                <SortHeader label="Project" k="project" />
-              </th>
-              <th className="p-2">
-                <SortHeader label="Round" k="round" />
-              </th>
-              <th className="p-2">
-                <SortHeader label="Loại" k="type" />
-              </th>
-              <th className="p-2">Đáp án</th>
-              <th className="p-2 text-center">Thao tác</th>
-            </tr>
-          </thead>
-          <tbody>
+      {/* ===== LIST CARDS (mỗi item 1 card ngang) ===== */}
+      <section className="space-y-2">
+        {loading ? (
+          <div>Đang tải...</div>
+        ) : (
+          <>
+            {/* header row tối giản */}
+            <div className="flex items-center gap-2 text-sm text-gray-700 border rounded bg-white p-2">
+              <input
+                type="checkbox"
+                checked={allVisibleSelected}
+                onChange={toggleSelectAllVisible}
+                aria-label="Chọn tất cả trang này"
+              />
+              <span>Chọn tất cả trên trang</span>
+              <span className="ml-auto text-xs text-gray-500">Mỗi trang: {PAGE_SIZE} item</span>
+            </div>
+
             {visibleItems.map((i) => {
               const round = rounds.find((r) => r.id === i.round_id);
               const project = projects.find((p) => p.id === i.project_id);
+
               return (
-                <tr key={i.id} className="border-t">
-                  <td className="p-2 text-center align-top">
+                <div key={i.id} className="border rounded bg-white p-3 flex items-start gap-3">
+                  <div className="pt-1">
                     <input
                       type="checkbox"
                       checked={selectedIds.has(i.id)}
                       onChange={() => toggleSelectOne(i.id)}
                       aria-label={`Chọn ${i.code || i.id}`}
                     />
-                  </td>
+                  </div>
 
-                  <td className="p-2 text-center align-top">{i.item_order ?? ''}</td>
-                  <td className="p-2 align-top whitespace-pre-wrap">{i.prompt}</td>
-                  <td className="p-2 align-top">{i.code ?? ''}</td>
-                  <td className="p-2 align-top">{project?.title || ''}</td>
-                  <td className="p-2 align-top">{round ? `Vòng ${round.round_number}` : ''}</td>
-                  <td className="p-2 align-top">{i.type}</td>
-                  <td className="p-2 align-top">
-                    {Array.isArray(i.options_json?.choices) ? i.options_json.choices.join(' | ') : ''}
-                  </td>
+                  {/* left meta */}
+                  <div className="w-56 shrink-0 text-sm">
+                    <div className="font-semibold">
+                      {i.code ? i.code : <span className="text-gray-500">(no code)</span>}
+                    </div>
+                    <div className="text-xs text-gray-600 mt-1">
+                      <div>Order: <b>{i.item_order ?? '—'}</b></div>
+                      <div>Type: <b>{i.type}</b></div>
+                      <div className="mt-1">
+                        <div className="truncate" title={project?.title || ''}>
+                          Project: <b>{project?.title || '—'}</b>
+                        </div>
+                        <div>
+                          Round: <b>{round ? `Vòng ${round.round_number}` : '—'}</b>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
 
-                  <td className="p-2 align-top text-center whitespace-nowrap">
+                  {/* main content */}
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm whitespace-pre-wrap leading-5">
+                      {truncate(i.prompt, 260)}
+                    </div>
+
+                    <div className="mt-2 text-xs text-gray-600">
+                      {Array.isArray(i.options_json?.choices) && i.options_json.choices.length > 0 ? (
+                        <div className="truncate" title={i.options_json.choices.join(' | ')}>
+                          Choices: {i.options_json.choices.join(' | ')}
+                        </div>
+                      ) : (
+                        <div className="text-gray-400">Choices: —</div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* actions */}
+                  <div className="shrink-0 flex items-center gap-2">
                     <button
-                      className="px-3 py-1 rounded bg-blue-600 text-white mr-2"
+                      className="px-3 py-2 rounded bg-blue-600 text-white"
                       onClick={() => openEditModal(i)}
                     >
                       Sửa
                     </button>
-                    <button className="px-3 py-1 rounded bg-red-600 text-white" onClick={() => deleteOneItem(i)}>
+                    <button
+                      className="px-3 py-2 rounded bg-red-600 text-white"
+                      onClick={() => deleteOneItem(i)}
+                    >
                       Xóa
                     </button>
-                  </td>
-                </tr>
+                  </div>
+                </div>
               );
             })}
 
             {visibleItems.length === 0 && (
-              <tr>
-                <td className="p-4 text-center text-gray-500" colSpan={9}>
-                  Không có item nào phù hợp bộ lọc.
-                </td>
-              </tr>
+              <div className="p-4 text-center text-gray-500 border rounded bg-white">
+                Không có item nào phù hợp bộ lọc.
+              </div>
             )}
-          </tbody>
-        </table>
-      )}
+          </>
+        )}
+      </section>
 
       {/* ===== EDIT MODAL ===== */}
       {editOpen && (
@@ -908,21 +1049,17 @@ export default function AdminItemManager() {
             <div className="p-4 space-y-3">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 <div>
-                  <label className="text-xs text-gray-600">Project</label>
-                  <select
-                    className="border p-2 rounded w-full"
-                    value={editProjectId}
-                    onChange={(e) => {
-                      setEditProjectId(e.target.value);
+                  <label className="text-xs text-gray-600">Project (gõ để tìm)</label>
+                  <ProjectCombobox
+                    projects={projects}
+                    valueId={editProjectId}
+                    onChange={(nextId) => {
+                      setEditProjectId(nextId);
                       setEditRoundId('');
                     }}
-                  >
-                    {projects.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.title}
-                      </option>
-                    ))}
-                  </select>
+                    className="min-w-full"
+                    placeholder="Gõ để tìm project…"
+                  />
                 </div>
 
                 <div>
@@ -931,6 +1068,7 @@ export default function AdminItemManager() {
                     className="border p-2 rounded w-full"
                     value={editRoundId}
                     onChange={(e) => setEditRoundId(e.target.value)}
+                    disabled={!editProjectId}
                   >
                     <option value="">— Không gán Round —</option>
                     {filteredRoundsForEdit
@@ -946,12 +1084,20 @@ export default function AdminItemManager() {
 
                 <div>
                   <label className="text-xs text-gray-600">Code</label>
-                  <input className="border p-2 rounded w-full" value={editCode} onChange={(e) => setEditCode(e.target.value)} />
+                  <input
+                    className="border p-2 rounded w-full"
+                    value={editCode}
+                    onChange={(e) => setEditCode(e.target.value)}
+                  />
                 </div>
 
                 <div>
                   <label className="text-xs text-gray-600">Type</label>
-                  <input className="border p-2 rounded w-full" value={editType} onChange={(e) => setEditType(e.target.value)} />
+                  <input
+                    className="border p-2 rounded w-full"
+                    value={editType}
+                    onChange={(e) => setEditType(e.target.value)}
+                  />
                 </div>
 
                 <div>
@@ -969,7 +1115,7 @@ export default function AdminItemManager() {
                 <label className="text-xs text-gray-600">Prompt</label>
                 <textarea
                   className="border p-2 rounded w-full"
-                  rows={4}
+                  rows={5}
                   value={editPrompt}
                   onChange={(e) => setEditPrompt(e.target.value)}
                 />
@@ -988,10 +1134,18 @@ export default function AdminItemManager() {
             </div>
 
             <div className="p-4 border-t flex items-center justify-end gap-2">
-              <button className="px-4 py-2 rounded bg-gray-100 hover:bg-gray-200" onClick={closeEditModal} disabled={savingEdit}>
+              <button
+                className="px-4 py-2 rounded bg-gray-100 hover:bg-gray-200"
+                onClick={closeEditModal}
+                disabled={savingEdit}
+              >
                 Hủy
               </button>
-              <button className="px-4 py-2 rounded bg-blue-600 text-white disabled:opacity-50" onClick={saveEdit} disabled={savingEdit}>
+              <button
+                className="px-4 py-2 rounded bg-blue-600 text-white disabled:opacity-50"
+                onClick={saveEdit}
+                disabled={savingEdit}
+              >
                 {savingEdit ? 'Đang cập nhật…' : 'Cập nhật'}
               </button>
             </div>
