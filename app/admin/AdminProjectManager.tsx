@@ -68,9 +68,14 @@ function toNextDayStartISO(dateStr: string) {
   return d.toISOString();
 }
 
-// ✅ normalize chuỗi tìm kiếm (tránh các case ký tự tổ hợp Unicode)
+// ✅ Normalize + escape cho ilike/or filter
 function normalizeQuery(s: string) {
   return (s ?? '').trim().normalize('NFC');
+}
+function escapeForIlike(s: string) {
+  // PostgREST ilike không có ESCAPE clause rõ ràng, nhưng vẫn nên tránh %/_ phá pattern
+  // (đa số trường hợp thực tế không nhập %/_ nên cũng ổn)
+  return s.replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_');
 }
 
 export default function AdminProjectManager() {
@@ -129,13 +134,23 @@ export default function AdminProjectManager() {
 
     if (filterStatus) q = q.eq('status', filterStatus);
 
-    // ✅ FIX: dùng full-text websearch để gõ "nội" vẫn match "(nội bộ)"
-    const nameQuery = normalizeQuery(filterTitle);
-    if (nameQuery) {
-      q = q.textSearch('title', nameQuery, { type: 'websearch', config: 'simple' });
+    // ✅ FIX CHẮC CHẮN: dùng contains-substring bằng ILIKE + OR pattern
+    // - gõ "nội" phải match "(nội bộ)"
+    // - không phụ thuộc dấu "("
+    const raw = normalizeQuery(filterTitle);
+    if (raw) {
+      const kw = escapeForIlike(raw);
+      // PostgREST .or() nhận chuỗi điều kiện phân tách bằng dấu phẩy
+      // Lưu ý: pattern phải viết dạng title.ilike.%...%
+      q = q.or(
+        [
+          `title.ilike.%${kw}%`,
+          `title.ilike.%(${kw}%`,
+          `title.ilike.%（${kw}%`, // ngoặc fullwidth (hay gặp trong dữ liệu copy/paste)
+        ].join(',')
+      );
     }
 
-    // lọc theo ngày tạo
     if (dateFrom) q = q.gte('created_at', toStartOfDayISO(dateFrom));
     if (dateTo) q = q.lt('created_at', toNextDayStartISO(dateTo));
 
@@ -154,7 +169,6 @@ export default function AdminProjectManager() {
     setTotal(count ?? 0);
     setPage(nextPage);
 
-    // init drafts cho các rows mới
     setDrafts((prev) => {
       const next = { ...prev };
       rows.forEach((p) => {
@@ -406,11 +420,10 @@ export default function AdminProjectManager() {
         </div>
       </section>
 
-      {/* ===== FILTERS (1 ROW) ===== */}
+      {/* ===== FILTERS (1 ROW, gọn) ===== */}
       <section className="bg-white border rounded-xl p-4 space-y-3">
         <h3 className="font-semibold">🔎 Bộ lọc</h3>
 
-        {/* ✅ 1 dòng, không xuống dòng; nếu màn hình hẹp thì kéo ngang khu filter */}
         <div className="flex flex-nowrap items-end gap-3 overflow-x-auto pb-1">
           <div className="min-w-[280px]">
             <label className="text-sm text-gray-600">Tìm theo tên Project</label>
