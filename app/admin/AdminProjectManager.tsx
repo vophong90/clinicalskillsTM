@@ -90,6 +90,7 @@ export default function AdminProjectManager() {
   const [filterStatus, setFilterStatus] = useState<string>(''); // '' = all
   const [dateFrom, setDateFrom] = useState<string>(''); // YYYY-MM-DD
   const [dateTo, setDateTo] = useState<string>(''); // YYYY-MM-DD
+  const [filterTitle, setFilterTitle] = useState<string>(''); // ✅ NEW: tìm theo tên project
 
   // ====== INLINE EDIT ======
   const [drafts, setDrafts] = useState<Record<string, { title: string; description: string; status: string }>>({});
@@ -108,7 +109,7 @@ export default function AdminProjectManager() {
   useEffect(() => {
     loadProjects(1);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filterStatus, dateFrom, dateTo]);
+  }, [filterStatus, dateFrom, dateTo, filterTitle]);
 
   async function loadProjects(nextPage: number) {
     setLoading(true);
@@ -123,6 +124,9 @@ export default function AdminProjectManager() {
       .order('created_at', { ascending: false });
 
     if (filterStatus) q = q.eq('status', filterStatus);
+
+    // ✅ NEW: lọc theo tên project (case-insensitive)
+    if (filterTitle.trim()) q = q.ilike('title', `%${filterTitle.trim()}%`);
 
     // lọc theo ngày tạo
     if (dateFrom) q = q.gte('created_at', toStartOfDayISO(dateFrom));
@@ -402,6 +406,17 @@ export default function AdminProjectManager() {
       <section className="bg-white border rounded-xl p-4 space-y-3">
         <h3 className="font-semibold">🔎 Bộ lọc</h3>
         <div className="grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
+          {/* ✅ NEW: Tìm theo tên project */}
+          <div className="md:col-span-2">
+            <label className="text-sm text-gray-600">Tìm theo tên Project</label>
+            <input
+              className={INPUT}
+              placeholder="Gõ một phần tên project…"
+              value={filterTitle}
+              onChange={(e) => setFilterTitle(e.target.value)}
+            />
+          </div>
+
           <div>
             <label className="text-sm text-gray-600">Trạng thái</label>
             <select className={INPUT} value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}>
@@ -424,11 +439,12 @@ export default function AdminProjectManager() {
             <input className={INPUT} type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
           </div>
 
-          <div className="flex gap-2">
+          <div className="flex gap-2 md:col-span-4">
             <button
               className={BTN_SECONDARY}
               type="button"
               onClick={() => {
+                setFilterTitle('');
                 setFilterStatus('');
                 setDateFrom('');
                 setDateTo('');
@@ -465,16 +481,10 @@ export default function AdminProjectManager() {
           <div className="space-y-2">
             {projects.map((p) => {
               const d = drafts[p.id] ?? { title: p.title, description: p.description ?? '', status: p.status };
-              const dirty =
-                d.title !== p.title ||
-                (d.description ?? '') !== (p.description ?? '') ||
-                d.status !== p.status;
+              const dirty = d.title !== p.title || (d.description ?? '') !== (p.description ?? '') || d.status !== p.status;
 
               return (
-                <div
-                  key={p.id}
-                  className="border rounded-lg px-3 py-2 bg-white hover:bg-gray-50 transition flex items-center gap-3"
-                >
+                <div key={p.id} className="border rounded-lg px-3 py-2 bg-white hover:bg-gray-50 transition flex items-center gap-3">
                   {/* LEFT: compact editable fields */}
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
@@ -529,19 +539,12 @@ export default function AdminProjectManager() {
                       ))}
                     </select>
 
-                    <div className="mt-1 text-xs text-gray-600 whitespace-nowrap">
-                      {new Date(p.created_at).toLocaleString()}
-                    </div>
+                    <div className="mt-1 text-xs text-gray-600 whitespace-nowrap">{new Date(p.created_at).toLocaleString()}</div>
                   </div>
 
                   {/* RIGHT: actions */}
                   <div className="shrink-0 flex items-center gap-2">
-                    <button
-                      className={BTN_PRIMARY}
-                      disabled={!dirty || savingId === p.id}
-                      onClick={() => updateProject(p.id)}
-                      type="button"
-                    >
+                    <button className={BTN_PRIMARY} disabled={!dirty || savingId === p.id} onClick={() => updateProject(p.id)} type="button">
                       {savingId === p.id ? 'Đang…' : 'Lưu'}
                     </button>
 
@@ -556,9 +559,7 @@ export default function AdminProjectManager() {
             })}
 
             {projects.length === 0 && (
-              <div className="p-4 text-center text-gray-500 border rounded-xl bg-gray-50">
-                Không có project phù hợp bộ lọc.
-              </div>
+              <div className="p-4 text-center text-gray-500 border rounded-xl bg-gray-50">Không có project phù hợp bộ lọc.</div>
             )}
           </div>
         )}
