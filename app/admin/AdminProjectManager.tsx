@@ -60,13 +60,17 @@ function parseSimpleCSV(text: string): Array<Record<string, string>> {
 }
 
 function toStartOfDayISO(dateStr: string) {
-  // dateStr: YYYY-MM-DD
   return new Date(`${dateStr}T00:00:00.000Z`).toISOString();
 }
 function toNextDayStartISO(dateStr: string) {
   const d = new Date(`${dateStr}T00:00:00.000Z`);
   d.setUTCDate(d.getUTCDate() + 1);
   return d.toISOString();
+}
+
+// ✅ normalize chuỗi tìm kiếm (tránh các case ký tự tổ hợp Unicode)
+function normalizeQuery(s: string) {
+  return (s ?? '').trim().normalize('NFC');
 }
 
 export default function AdminProjectManager() {
@@ -87,10 +91,10 @@ export default function AdminProjectManager() {
   const totalPages = useMemo(() => Math.max(1, Math.ceil(total / PAGE_SIZE)), [total]);
 
   // ====== FILTERS ======
+  const [filterTitle, setFilterTitle] = useState<string>(''); // ✅ tìm theo tên
   const [filterStatus, setFilterStatus] = useState<string>(''); // '' = all
   const [dateFrom, setDateFrom] = useState<string>(''); // YYYY-MM-DD
   const [dateTo, setDateTo] = useState<string>(''); // YYYY-MM-DD
-  const [filterTitle, setFilterTitle] = useState<string>(''); // ✅ NEW: tìm theo tên project
 
   // ====== INLINE EDIT ======
   const [drafts, setDrafts] = useState<Record<string, { title: string; description: string; status: string }>>({});
@@ -109,7 +113,7 @@ export default function AdminProjectManager() {
   useEffect(() => {
     loadProjects(1);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filterStatus, dateFrom, dateTo, filterTitle]);
+  }, [filterTitle, filterStatus, dateFrom, dateTo]);
 
   async function loadProjects(nextPage: number) {
     setLoading(true);
@@ -125,12 +129,15 @@ export default function AdminProjectManager() {
 
     if (filterStatus) q = q.eq('status', filterStatus);
 
-    // ✅ NEW: lọc theo tên project (case-insensitive)
-    if (filterTitle.trim()) q = q.ilike('title', `%${filterTitle.trim()}%`);
+    // ✅ FIX: dùng full-text websearch để gõ "nội" vẫn match "(nội bộ)"
+    const nameQuery = normalizeQuery(filterTitle);
+    if (nameQuery) {
+      q = q.textSearch('title', nameQuery, { type: 'websearch', config: 'simple' });
+    }
 
     // lọc theo ngày tạo
     if (dateFrom) q = q.gte('created_at', toStartOfDayISO(dateFrom));
-    if (dateTo) q = q.lt('created_at', toNextDayStartISO(dateTo)); // < đầu ngày hôm sau để include trọn dateTo
+    if (dateTo) q = q.lt('created_at', toNextDayStartISO(dateTo));
 
     const { data, error, count } = await q.range(from, to);
 
@@ -225,7 +232,6 @@ export default function AdminProjectManager() {
     if (error) setMessage('❌ Lỗi xóa: ' + error.message);
     else setMessage('🗑️ Đã xóa Project!');
 
-    // nếu xóa làm trang rỗng thì lùi trang
     const nextPage = page > 1 && projects.length === 1 ? page - 1 : page;
     await loadProjects(nextPage);
   }
@@ -238,7 +244,6 @@ export default function AdminProjectManager() {
     const text = await file.text();
     const rows = parseSimpleCSV(text);
 
-    // yêu cầu cột: title, description
     const valid = rows
       .map((r) => ({
         title: (r.title ?? '').trim(),
@@ -277,7 +282,7 @@ export default function AdminProjectManager() {
         .map((r) => ({
           title: r.title,
           description: r.description ? r.description : null,
-          status: 'active', // CSV chỉ có title/description → set default "Hoạt động"
+          status: 'active',
           created_by,
         }));
 
@@ -289,7 +294,6 @@ export default function AdminProjectManager() {
       const ok = window.confirm(`Tạo ${items.length} project từ CSV?`);
       if (!ok) return;
 
-      // Insert theo batch để tránh payload lớn
       const BATCH = 200;
       let success = 0;
       let failed = 0;
@@ -402,12 +406,13 @@ export default function AdminProjectManager() {
         </div>
       </section>
 
-      {/* ===== FILTERS ===== */}
+      {/* ===== FILTERS (1 ROW) ===== */}
       <section className="bg-white border rounded-xl p-4 space-y-3">
         <h3 className="font-semibold">🔎 Bộ lọc</h3>
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
-          {/* ✅ NEW: Tìm theo tên project */}
-          <div className="md:col-span-2">
+
+        {/* ✅ 1 dòng, không xuống dòng; nếu màn hình hẹp thì kéo ngang khu filter */}
+        <div className="flex flex-nowrap items-end gap-3 overflow-x-auto pb-1">
+          <div className="min-w-[280px]">
             <label className="text-sm text-gray-600">Tìm theo tên Project</label>
             <input
               className={INPUT}
@@ -417,7 +422,7 @@ export default function AdminProjectManager() {
             />
           </div>
 
-          <div>
+          <div className="min-w-[220px]">
             <label className="text-sm text-gray-600">Trạng thái</label>
             <select className={INPUT} value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}>
               <option value="">— Tất cả —</option>
@@ -429,19 +434,19 @@ export default function AdminProjectManager() {
             </select>
           </div>
 
-          <div>
+          <div className="min-w-[190px]">
             <label className="text-sm text-gray-600">Ngày tạo từ</label>
             <input className={INPUT} type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
           </div>
 
-          <div>
+          <div className="min-w-[190px]">
             <label className="text-sm text-gray-600">Ngày tạo đến</label>
             <input className={INPUT} type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
           </div>
 
-          <div className="flex gap-2 md:col-span-4">
+          <div className="min-w-[120px]">
             <button
-              className={BTN_SECONDARY}
+              className={BTN_SECONDARY + ' w-full justify-center'}
               type="button"
               onClick={() => {
                 setFilterTitle('');
@@ -450,7 +455,7 @@ export default function AdminProjectManager() {
                 setDateTo('');
               }}
             >
-              Reset lọc
+              Reset
             </button>
           </div>
         </div>
@@ -465,7 +470,6 @@ export default function AdminProjectManager() {
           </div>
         </div>
 
-        {/* Pagination controls */}
         <div className="flex items-center gap-2">
           <button className={BTN_SECONDARY} disabled={page <= 1 || loading} onClick={() => loadProjects(page - 1)}>
             ◀ Trang trước
@@ -481,11 +485,16 @@ export default function AdminProjectManager() {
           <div className="space-y-2">
             {projects.map((p) => {
               const d = drafts[p.id] ?? { title: p.title, description: p.description ?? '', status: p.status };
-              const dirty = d.title !== p.title || (d.description ?? '') !== (p.description ?? '') || d.status !== p.status;
+              const dirty =
+                d.title !== p.title ||
+                (d.description ?? '') !== (p.description ?? '') ||
+                d.status !== p.status;
 
               return (
-                <div key={p.id} className="border rounded-lg px-3 py-2 bg-white hover:bg-gray-50 transition flex items-center gap-3">
-                  {/* LEFT: compact editable fields */}
+                <div
+                  key={p.id}
+                  className="border rounded-lg px-3 py-2 bg-white hover:bg-gray-50 transition flex items-center gap-3"
+                >
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
                       <div className="text-xs text-gray-500 shrink-0">Title</div>
@@ -517,7 +526,6 @@ export default function AdminProjectManager() {
                     </div>
                   </div>
 
-                  {/* MID: status + created */}
                   <div className="w-[220px] shrink-0">
                     <div className="text-xs text-gray-500">
                       Hiện tại: <span className="font-semibold text-gray-900">{viProjectStatus(p.status)}</span>
@@ -539,12 +547,18 @@ export default function AdminProjectManager() {
                       ))}
                     </select>
 
-                    <div className="mt-1 text-xs text-gray-600 whitespace-nowrap">{new Date(p.created_at).toLocaleString()}</div>
+                    <div className="mt-1 text-xs text-gray-600 whitespace-nowrap">
+                      {new Date(p.created_at).toLocaleString()}
+                    </div>
                   </div>
 
-                  {/* RIGHT: actions */}
                   <div className="shrink-0 flex items-center gap-2">
-                    <button className={BTN_PRIMARY} disabled={!dirty || savingId === p.id} onClick={() => updateProject(p.id)} type="button">
+                    <button
+                      className={BTN_PRIMARY}
+                      disabled={!dirty || savingId === p.id}
+                      onClick={() => updateProject(p.id)}
+                      type="button"
+                    >
                       {savingId === p.id ? 'Đang…' : 'Lưu'}
                     </button>
 
@@ -559,7 +573,9 @@ export default function AdminProjectManager() {
             })}
 
             {projects.length === 0 && (
-              <div className="p-4 text-center text-gray-500 border rounded-xl bg-gray-50">Không có project phù hợp bộ lọc.</div>
+              <div className="p-4 text-center text-gray-500 border rounded-xl bg-gray-50">
+                Không có project phù hợp bộ lọc.
+              </div>
             )}
           </div>
         )}
