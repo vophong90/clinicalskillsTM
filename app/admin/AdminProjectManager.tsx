@@ -15,11 +15,11 @@ type Project = {
 const INPUT =
   'w-full border rounded-lg px-3 py-2 outline-none focus:border-blue-300 focus:ring-2 focus:ring-blue-200';
 const BTN_PRIMARY =
-  'inline-flex items-center px-4 py-2 rounded-lg font-semibold bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50';
+  'inline-flex items-center px-3 py-1.5 rounded-md text-sm font-medium bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50';
 const BTN_SECONDARY =
   'inline-flex items-center px-3 py-1.5 rounded-lg font-semibold bg-gray-100 text-gray-800 hover:bg-gray-200 disabled:opacity-50';
 const BTN_DANGER =
-  'inline-flex items-center px-3 py-1.5 rounded-lg font-semibold bg-red-600 text-white hover:bg-red-700 disabled:opacity-50';
+  'inline-flex items-center px-3 py-1.5 rounded-md text-sm font-medium bg-red-600 text-white hover:bg-red-700 disabled:opacity-50';
 
 // ✅ 10 project / trang
 const PAGE_SIZE = 10;
@@ -576,7 +576,7 @@ export default function AdminProjectManager() {
                     </button>
 
                     <button className={BTN_DANGER} onClick={() => deleteProject(p.id)} type="button">
-                      🗑️
+                      Xóa
                     </button>
                   </div>
 
