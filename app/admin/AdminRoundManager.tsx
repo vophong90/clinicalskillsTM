@@ -87,6 +87,27 @@ function fmtMaybeDT(value: string | null) {
   }
 }
 
+/** ✅ Normalize để tìm kiếm ổn định với Unicode + dấu ngoặc */
+function normalizeText(s: string) {
+  return (s ?? '')
+    .normalize('NFC')
+    .toLowerCase()
+    .replaceAll('（', '(')
+    .replaceAll('）', ')')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/** ✅ Match "lỏng": gõ "nội" vẫn match "(nội bộ)" */
+function includesLoose(haystack: string, needle: string) {
+  const h = normalizeText(haystack);
+  const n = normalizeText(needle);
+  if (!n) return false;
+  if (h.includes(n)) return true;
+  if (h.includes('(' + n)) return true;
+  return false;
+}
+
 export default function AdminRoundManager() {
   // ===== DATA =====
   const [projects, setProjects] = useState<Project[]>([]);
@@ -106,8 +127,7 @@ export default function AdminRoundManager() {
   );
 
   // ===== FILTERS (ROUND LIST) =====
-  const [filterProjectId, setFilterProjectId] = useState<string>(''); // actual filter id
-  const [filterProjectKeyword, setFilterProjectKeyword] = useState<string>(''); // search text
+  const [filterProjectKeyword, setFilterProjectKeyword] = useState<string>(''); // ✅ dùng keyword để lọc rounds
   const [filterStatus, setFilterStatus] = useState<string>('');
   const [roundDateFrom, setRoundDateFrom] = useState<string>(''); // created_at from
   const [roundDateTo, setRoundDateTo] = useState<string>(''); // created_at to
@@ -119,10 +139,8 @@ export default function AdminRoundManager() {
   const [autoNumber, setAutoNumber] = useState(true);
   const [manualNumber, setManualNumber] = useState(1);
 
-  // mặc định draft, không hiển thị dropdown
   const CREATE_DEFAULT_STATUS: 'draft' = 'draft';
 
-  // open_at + close_at cùng 1 hàng
   const [createOpenAt, setCreateOpenAt] = useState<string>(''); // datetime-local
   const [createCloseAt, setCreateCloseAt] = useState<string>(''); // datetime-local
   const [createDescription, setCreateDescription] = useState('');
@@ -171,26 +189,29 @@ export default function AdminRoundManager() {
     return m;
   }, [projects]);
 
-  // ===== filtered options for round filter search =====
-  const filteredProjectOptions = useMemo(() => {
-    const kw = filterProjectKeyword.trim().toLowerCase();
-    if (!kw) return [];
-    return projects.filter((p) => p.title.toLowerCase().includes(kw));
+  /** ✅ keyword -> matched project_ids để filter rounds */
+  const matchedProjectIdsForKeyword = useMemo(() => {
+    const kw = filterProjectKeyword.trim();
+    if (!kw) return null; // null = không áp filter
+    const ids = projects
+      .filter((p) => includesLoose(p.title, kw))
+      .map((p) => p.id);
+    return ids;
   }, [projects, filterProjectKeyword]);
 
   // ===== LOAD =====
   useEffect(() => {
     loadProjects();
-    loadRounds(1);
+    // rounds sẽ được load sau khi có projects để keyword filter hoạt động đúng
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // khi projects đã load xong hoặc filter đổi => reload rounds
   useEffect(() => {
     loadRounds(1);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filterProjectId, filterStatus, roundDateFrom, roundDateTo]);
+  }, [projects, filterProjectKeyword, filterStatus, roundDateFrom, roundDateTo]);
 
-  // reset project picker page when filter changes
   useEffect(() => {
     setProjectPage(1);
   }, [projectSearch, projectCreatedFrom, projectCreatedTo]);
@@ -222,6 +243,25 @@ export default function AdminRoundManager() {
     const from = (nextPage - 1) * ROUND_PAGE_SIZE;
     const to = from + ROUND_PAGE_SIZE - 1;
 
+    // ✅ Nếu đang có keyword nhưng chưa load projects xong -> tạm chưa query
+    const kw = filterProjectKeyword.trim();
+    if (kw && loadingProjects) {
+      setRounds([]);
+      setRoundTotal(0);
+      setRoundPage(1);
+      setLoadingRounds(false);
+      return;
+    }
+
+    // ✅ Nếu có keyword và không match project nào -> list rỗng luôn (khỏi query rounds)
+    if (kw && matchedProjectIdsForKeyword && matchedProjectIdsForKeyword.length === 0) {
+      setRounds([]);
+      setRoundTotal(0);
+      setRoundPage(1);
+      setLoadingRounds(false);
+      return;
+    }
+
     let q = supabase
       .from('rounds')
       .select(
@@ -230,7 +270,11 @@ export default function AdminRoundManager() {
       )
       .order('created_at', { ascending: false });
 
-    if (filterProjectId) q = q.eq('project_id', filterProjectId);
+    // ✅ keyword filter -> rounds.project_id IN (matched project ids)
+    if (kw && matchedProjectIdsForKeyword && matchedProjectIdsForKeyword.length > 0) {
+      q = q.in('project_id', matchedProjectIdsForKeyword);
+    }
+
     if (filterStatus) q = q.eq('status', filterStatus);
     if (roundDateFrom) q = q.gte('created_at', toStartOfDayISO(roundDateFrom));
     if (roundDateTo) q = q.lt('created_at', toNextDayStartISO(roundDateTo));
@@ -250,7 +294,6 @@ export default function AdminRoundManager() {
     setRoundTotal(count ?? 0);
     setRoundPage(nextPage);
 
-    // init drafts
     setDrafts((prev) => {
       const next = { ...prev };
       rows.forEach((r) => {
@@ -270,13 +313,13 @@ export default function AdminRoundManager() {
     setLoadingRounds(false);
   }
 
-  // ===== Project picker derived list (filter by name + created_at) =====
+  // ===== Project picker derived list (CREATE section) =====
   const filteredProjects = useMemo(() => {
     let list = projects;
 
-    const kw = projectSearch.trim().toLowerCase();
-    if (kw) {
-      list = list.filter((p) => p.title.toLowerCase().includes(kw));
+    const kw2 = projectSearch.trim().toLowerCase();
+    if (kw2) {
+      list = list.filter((p) => p.title.toLowerCase().includes(kw2));
     }
 
     if (projectCreatedFrom) {
@@ -347,7 +390,6 @@ export default function AdminRoundManager() {
     try {
       const selectedIds = Array.from(selectedProjectIds);
 
-      // 1) auto number: max+1 each project
       let nextNumberByProject = new Map<string, number>();
       if (autoNumber) {
         const PAGE = 1000;
@@ -384,14 +426,13 @@ export default function AdminRoundManager() {
         selectedIds.forEach((pid) => nextNumberByProject.set(pid, manualNumber));
       }
 
-      // 2) insert batch
       const open_at = createOpenAt ? parseLocalDT(createOpenAt) : null;
       const close_at = createCloseAt ? parseLocalDT(createCloseAt) : null;
 
       const inserts = selectedIds.map((pid) => ({
         project_id: pid,
         round_number: nextNumberByProject.get(pid) ?? 1,
-        status: CREATE_DEFAULT_STATUS, // draft
+        status: CREATE_DEFAULT_STATUS,
         description: createDescription.trim() ? createDescription.trim() : null,
         open_at,
         close_at,
@@ -506,7 +547,6 @@ export default function AdminRoundManager() {
       <section className="bg-white border rounded-2xl p-5 space-y-4 shadow-sm">
         <h3 className="font-semibold text-lg">➕ Tạo Round (chọn nhiều Project)</h3>
 
-        {/* search + project created date filter */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
           <div className="md:col-span-1">
             <label className="text-sm text-gray-600">Tìm project theo tên</label>
@@ -539,7 +579,6 @@ export default function AdminRoundManager() {
           </div>
         </div>
 
-        {/* Selected count + actions */}
         <div className="flex items-center justify-between flex-wrap gap-2">
           <div className="text-sm text-gray-700">
             Đã chọn: <b>{selectedProjectIds.size}</b> project
@@ -564,7 +603,6 @@ export default function AdminRoundManager() {
           </div>
         </div>
 
-        {/* Project checklist (10 items/page) */}
         <div className="border rounded-xl p-3 bg-gray-50">
           {loadingProjects ? (
             <div className="text-sm text-gray-500">Đang tải project…</div>
@@ -611,7 +649,6 @@ export default function AdminRoundManager() {
           )}
         </div>
 
-        {/* Create options */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="space-y-2">
             <label className="flex items-center gap-2 text-sm">
@@ -637,7 +674,6 @@ export default function AdminRoundManager() {
             </div>
           </div>
 
-          {/* open_at + close_at cùng 1 hàng */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <div>
               <label className="text-sm text-gray-600">Ngày mở</label>
@@ -686,55 +722,18 @@ export default function AdminRoundManager() {
         <h3 className="font-semibold text-lg">🔎 Bộ lọc danh sách Round</h3>
 
         <div className="grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
-          {/* Project search like "Tìm project theo tên" */}
-          <div className="relative md:col-span-1">
+          {/* ✅ Project keyword filter (no dropdown) */}
+          <div className="md:col-span-1">
             <label className="text-sm text-gray-600">Project</label>
-
             <input
               className={INPUT}
-              placeholder="Gõ tên project để lọc…"
+              placeholder="Gõ từ khóa tên project để lọc round… (vd: nội)"
               value={filterProjectKeyword}
-              onChange={(e) => {
-                setFilterProjectKeyword(e.target.value);
-                setFilterProjectId(''); // reset id while typing
-              }}
+              onChange={(e) => setFilterProjectKeyword(e.target.value)}
             />
-
-            {/* suggestion dropdown */}
-            {filteredProjectOptions.length > 0 && (
-              <div className="absolute z-10 mt-1 w-full max-h-60 overflow-auto border rounded-lg bg-white shadow">
-                {filteredProjectOptions.map((p) => (
-                  <button
-                    key={p.id}
-                    type="button"
-                    className="w-full text-left px-3 py-2 text-sm hover:bg-blue-50"
-                    onClick={() => {
-                      setFilterProjectId(p.id);
-                      setFilterProjectKeyword(p.title); // lock text
-                    }}
-                  >
-                    {p.title}
-                  </button>
-                ))}
-              </div>
-            )}
-
-            {/* selected hint */}
-            {filterProjectId && (
-              <div className="mt-1 text-xs text-gray-600 flex items-center gap-2">
-                <span>
-                  Đang lọc theo: <b>{projectTitleById.get(filterProjectId)}</b>
-                </span>
-                <button
-                  type="button"
-                  className="text-red-600 hover:underline"
-                  onClick={() => {
-                    setFilterProjectId('');
-                    setFilterProjectKeyword('');
-                  }}
-                >
-                  ✕ Bỏ lọc
-                </button>
+            {!!filterProjectKeyword.trim() && !loadingProjects && matchedProjectIdsForKeyword && (
+              <div className="mt-1 text-xs text-gray-600">
+                Match: <b>{matchedProjectIdsForKeyword.length}</b> project
               </div>
             )}
           </div>
@@ -766,7 +765,6 @@ export default function AdminRoundManager() {
               className={BTN_SECONDARY}
               type="button"
               onClick={() => {
-                setFilterProjectId('');
                 setFilterProjectKeyword('');
                 setFilterStatus('');
                 setRoundDateFrom('');
