@@ -1,5 +1,6 @@
 // File: app/admin/AdminSurveyInviteManager.tsx
 'use client';
+
 import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 
@@ -37,11 +38,15 @@ const ACTIVE_STATUS = 'active';
  */
 function parseCsvToObjects(text: string): Record<string, string>[] {
   const rows: string[][] = [];
-  const s = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').replace(/^\uFEFF/, '');
+  const s = text
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
+    .replace(/^\uFEFF/, '');
   let i = 0,
     field = '',
     row: string[] = [],
     inQuotes = false;
+
   while (i < s.length) {
     const c = s[i];
     if (inQuotes) {
@@ -80,8 +85,10 @@ function parseCsvToObjects(text: string): Record<string, string>[] {
   }
   row.push(field);
   rows.push(row);
+
   while (rows.length && rows[rows.length - 1].every((v) => v.trim() === '')) rows.pop();
   if (rows.length === 0) return [];
+
   const header = rows[0].map((h) => h.trim());
   const out: Record<string, string>[] = [];
   for (let r = 1; r < rows.length; r++) {
@@ -104,12 +111,14 @@ export default function AdminSurveyInviteManager() {
   const [filterProject, setFilterProject] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
   const [filterRole, setFilterRole] = useState<'' | 'core_expert' | 'external_expert'>('');
-  const [filterEmailAge, setFilterEmailAge] = useState<
-    '' | 'never' | 'recent_7' | 'older_7'
-  >('');
+  const [filterEmailAge, setFilterEmailAge] = useState<'' | 'never' | 'recent_7' | 'older_7'>('');
   const [selectedRoundIds, setSelectedRoundIds] = useState<string[]>([]);
   const [checkedProfiles, setCheckedProfiles] = useState<Record<string, boolean>>({});
   const [q, setQ] = useState('');
+
+  // Pagination for step (3)
+  const PAGE_SIZE_PROFILES = 100;
+  const [page, setPage] = useState(1);
 
   // Email
   const [emailSubject, setEmailSubject] = useState('Lời mời tham gia khảo sát');
@@ -190,6 +199,7 @@ export default function AdminSurveyInviteManager() {
 
   useEffect(() => {
     reloadProgress();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filterProject, filterStatus]);
 
   // ===== DERIVED =====
@@ -202,15 +212,10 @@ export default function AdminSurveyInviteManager() {
     return m;
   }, [rounds]);
 
-  const activeProjects = useMemo(
-    () => projects.filter((p) => p.status === ACTIVE_STATUS),
-    [projects]
-  );
+  const activeProjects = useMemo(() => projects.filter((p) => p.status === ACTIVE_STATUS), [projects]);
 
   function toggleRound(id: string) {
-    setSelectedRoundIds((prev) =>
-      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
-    );
+    setSelectedRoundIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
   }
 
   // Lọc cơ bản (không dùng emailStats)
@@ -218,19 +223,14 @@ export default function AdminSurveyInviteManager() {
     const k = q.trim().toLowerCase();
     return profiles.filter((p) => {
       if (filterRole && p.role !== filterRole) return false;
-      const hit =
-        !k ||
-        p.email.toLowerCase().includes(k) ||
-        (p.name || '').toLowerCase().includes(k);
+      const hit = !k || p.email.toLowerCase().includes(k) || (p.name || '').toLowerCase().includes(k);
       return hit;
     });
   }, [profiles, q, filterRole]);
 
   // Lọc tiếp theo “độ tuổi” email gửi lần cuối (7 ngày)
   const filteredProfiles = useMemo(() => {
-    if (!filterEmailAge || selectedRoundIds.length === 0) {
-      return baseProfiles;
-    }
+    if (!filterEmailAge || selectedRoundIds.length === 0) return baseProfiles;
 
     const now = new Date();
 
@@ -256,10 +256,28 @@ export default function AdminSurveyInviteManager() {
     });
   }, [baseProfiles, filterEmailAge, selectedRoundIds, emailStats]);
 
-  const checkedIds = useMemo(
-    () => Object.keys(checkedProfiles).filter((id) => checkedProfiles[id]),
-    [checkedProfiles]
+  // Reset page về 1 khi đổi bộ lọc / từ khoá
+  useEffect(() => {
+    setPage(1);
+  }, [q, filterRole, filterEmailAge, selectedRoundIds]);
+
+  const totalPages = useMemo(
+    () => Math.max(1, Math.ceil(filteredProfiles.length / PAGE_SIZE_PROFILES)),
+    [filteredProfiles.length]
   );
+
+  const pageItems = useMemo(() => {
+    const p = Math.min(Math.max(page, 1), totalPages);
+    const start = (p - 1) * PAGE_SIZE_PROFILES;
+    return filteredProfiles.slice(start, start + PAGE_SIZE_PROFILES);
+  }, [filteredProfiles, page, totalPages]);
+
+  // đảm bảo page không vượt totalPages khi data giảm
+  useEffect(() => {
+    if (page > totalPages) setPage(totalPages);
+  }, [page, totalPages]);
+
+  const checkedIds = useMemo(() => Object.keys(checkedProfiles).filter((id) => checkedProfiles[id]), [checkedProfiles]);
 
   // ===== EMAIL STATS (đã gửi email chưa cho các vòng đang chọn) =====
   useEffect(() => {
@@ -274,10 +292,7 @@ export default function AdminSurveyInviteManager() {
         const res = await fetch('/api/email/stats', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            profile_ids: profileIds,
-            round_ids: selectedRoundIds,
-          }),
+          body: JSON.stringify({ profile_ids: profileIds, round_ids: selectedRoundIds }),
         });
         const d = await res.json();
         if (d.error) {
@@ -307,20 +322,12 @@ export default function AdminSurveyInviteManager() {
           const org = (r['org'] ?? '').trim();
           const title = (r['title'] ?? '').trim();
           const phone = (r['phone'] ?? '').trim();
-          return {
-            full_name,
-            email,
-            org: org || null,
-            title: title || null,
-            phone: phone || null,
-          };
+          return { full_name, email, org: org || null, title: title || null, phone: phone || null };
         })
         .filter((r) => r.full_name && r.email);
 
       if (rows.length === 0) {
-        throw new Error(
-          'Không tìm thấy dòng hợp lệ. Yêu cầu header: full_name,email (có thể kèm org,title,phone).'
-        );
+        throw new Error('Không tìm thấy dòng hợp lệ. Yêu cầu header: full_name,email (có thể kèm org,title,phone).');
       }
 
       const res = await fetch('/api/experts/bulk-upsert', {
@@ -337,7 +344,6 @@ export default function AdminSurveyInviteManager() {
         } người.`
       );
 
-      // refresh profiles (phân trang)
       const allProfiles = await fetchAllProfiles();
       setProfiles(allProfiles);
     } catch (e: any) {
@@ -347,20 +353,26 @@ export default function AdminSurveyInviteManager() {
     }
   }
 
-  // ===== ACTIONS =====
+  // ===== ACTIONS (chỉ tác động trang hiện tại) =====
   function selectAllFiltered() {
     const next: Record<string, boolean> = { ...checkedProfiles };
-    filteredProfiles.forEach((u) => {
+    pageItems.forEach((u) => {
       next[u.id] = true;
     });
     setCheckedProfiles(next);
   }
+
   function clearSelection() {
-    setCheckedProfiles({});
+    const next: Record<string, boolean> = { ...checkedProfiles };
+    pageItems.forEach((u) => {
+      delete next[u.id];
+    });
+    setCheckedProfiles(next);
   }
+
   function invertSelection() {
     const next: Record<string, boolean> = { ...checkedProfiles };
-    filteredProfiles.forEach((u) => {
+    pageItems.forEach((u) => {
       next[u.id] = !next[u.id];
     });
     setCheckedProfiles(next);
@@ -413,10 +425,10 @@ export default function AdminSurveyInviteManager() {
         return { project_title: pj?.title || '', round_label: r ? `V${r.round_number}` : '' };
       }),
     };
+
     const ul =
-      `<ul>` +
-      sample.rounds.map((r) => `<li>${r.project_title} – ${r.round_label}</li>`).join('') +
-      `</ul>`;
+      `<ul>` + sample.rounds.map((r) => `<li>${r.project_title} – ${r.round_label}</li>`).join('') + `</ul>`;
+
     let html = sample.raw
       .replace(/{{\s*full_name\s*}}/gi, sample.fullName)
       .replace(/{{\s*email\s*}}/gi, sample.email)
@@ -425,11 +437,14 @@ export default function AdminSurveyInviteManager() {
         /{{\s*open_button\s*}}/gi,
         `<a href="${process.env.NEXT_PUBLIC_BASE_URL || ''}" style="display:inline-block;padding:10px 16px;border-radius:8px;background:#2563eb;color:#fff;text-decoration:none">Mở trang khảo sát</a>`
       );
+
     if (!/{{\s*open_button\s*}}/i.test(sample.raw))
       html += `<div style="margin-top:12px"><a href="${
         process.env.NEXT_PUBLIC_BASE_URL || ''
       }" style="display:inline-block;padding:10px 16px;border-radius:8px;background:#2563eb;color:#fff;text-decoration:none">Mở trang khảo sát</a></div>`;
+
     if (!/{{\s*project_list\s*}}/i.test(sample.raw)) html += `<div style="margin-top:12px">${ul}</div>`;
+
     html += `<hr style="margin:24px 0"/><div style="font-size:12px;color:#6b7280">Khoa Y học cổ truyền - Đại học Y Dược Thành phố Hồ Chí Minh.</div>`;
     return html;
   }, [emailHtml, selectedRoundIds, rounds, projects]);
@@ -485,15 +500,14 @@ export default function AdminSurveyInviteManager() {
               </div>
             </div>
           ))}
-          {activeProjects.length === 0 && (
-            <div className="text-slate-500">Không có project đang hoạt động.</div>
-          )}
+          {activeProjects.length === 0 && <div className="text-slate-500">Không có project đang hoạt động.</div>}
         </div>
       </div>
 
       {/* 3) Chọn người tham gia */}
       <div className="space-y-3">
         <div className="font-semibold">3) Chọn người tham gia khảo sát</div>
+
         <div className="flex flex-wrap gap-3 items-center">
           <input
             className={INPUT + ' md:w-64'}
@@ -501,17 +515,12 @@ export default function AdminSurveyInviteManager() {
             value={q}
             onChange={(e) => setQ(e.target.value)}
           />
-          <select
-            className={INPUT + ' md:w-56'}
-            value={filterRole}
-            onChange={(e) => setFilterRole(e.target.value as any)}
-          >
+          <select className={INPUT + ' md:w-56'} value={filterRole} onChange={(e) => setFilterRole(e.target.value as any)}>
             <option value="">— Tất cả vai trò —</option>
             <option value="core_expert">Chuyên gia nòng cốt</option>
             <option value="external_expert">Chuyên gia bên ngoài</option>
           </select>
 
-          {/* Lọc theo ngày gửi email cuối cùng (7 ngày) */}
           <select
             className={INPUT + ' md:w-64'}
             value={filterEmailAge}
@@ -525,30 +534,63 @@ export default function AdminSurveyInviteManager() {
           </select>
 
           <div className="flex items-center gap-2">
-            <button className={BTN2} onClick={selectAllFiltered}>
-              Chọn tất cả (theo bộ lọc)
+            <button className={BTN2} onClick={selectAllFiltered} type="button">
+              Chọn tất cả (trang này)
             </button>
-            <button className={BTN2} onClick={invertSelection}>
-              Đảo chọn
+            <button className={BTN2} onClick={invertSelection} type="button">
+              Đảo chọn (trang này)
             </button>
-            <button className={BTN2} onClick={clearSelection}>
-              Bỏ chọn hết
+            <button className={BTN2} onClick={clearSelection} type="button">
+              Bỏ chọn (trang này)
             </button>
+
             <span className="text-sm text-slate-600">
-              Đã chọn: <b>{checkedIds.length}</b> / {filteredProfiles.length}
+              Đã chọn: <b>{checkedIds.length}</b> / {filteredProfiles.length}{' '}
+              <span className="text-slate-400">
+                (Trang {page}/{totalPages}, hiển thị {pageItems.length}/{PAGE_SIZE_PROFILES})
+              </span>
             </span>
           </div>
         </div>
 
+        {/* Pagination bar */}
+        <div className="flex items-center gap-2">
+          <button className={BTN2} onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page <= 1} type="button">
+            ← Trang trước
+          </button>
+
+          <div className="text-sm text-slate-600">
+            Trang <b>{page}</b> / {totalPages}
+          </div>
+
+          <button
+            className={BTN2}
+            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+            disabled={page >= totalPages}
+            type="button"
+          >
+            Trang sau →
+          </button>
+
+          <div className="ml-auto flex items-center gap-2">
+            <span className="text-sm text-slate-500">Đi tới:</span>
+            <input
+              className={INPUT + ' w-24'}
+              type="number"
+              min={1}
+              max={totalPages}
+              value={page}
+              onChange={(e) => setPage(Number(e.target.value) || 1)}
+            />
+          </div>
+        </div>
+
         <div className="border rounded max-h-80 overflow-auto">
-          {filteredProfiles.map((u) => {
+          {pageItems.map((u) => {
             const lastSent = selectedRoundIds.length ? emailStats[u.id] : null;
 
             return (
-              <label
-                key={u.id}
-                className="flex items-center gap-2 px-3 py-2 border-b last:border-b-0"
-              >
+              <label key={u.id} className="flex items-center gap-2 px-3 py-2 border-b last:border-b-0">
                 <input
                   type="checkbox"
                   checked={!!checkedProfiles[u.id]}
@@ -568,23 +610,19 @@ export default function AdminSurveyInviteManager() {
                   </span>
 
                   {selectedRoundIds.length === 0 ? (
-                    <span className="text-xs text-slate-400">
-                      Chọn vòng ở bước 2 để xem trạng thái email.
-                    </span>
+                    <span className="text-xs text-slate-400">Chọn vòng ở bước 2 để xem trạng thái email.</span>
                   ) : lastSent ? (
                     <span className="text-xs text-emerald-700">
-                      Đã gửi email (cho ít nhất 1 vòng đã chọn) lần cuối:{' '}
-                      {new Date(lastSent).toLocaleString()}
+                      Đã gửi email (cho ít nhất 1 vòng đã chọn) lần cuối: {new Date(lastSent).toLocaleString()}
                     </span>
                   ) : (
-                    <span className="text-xs text-slate-500">
-                      Chưa gửi email cho các vòng đã chọn.
-                    </span>
+                    <span className="text-xs text-slate-500">Chưa gửi email cho các vòng đã chọn.</span>
                   )}
                 </div>
               </label>
             );
           })}
+
           {filteredProfiles.length === 0 && (
             <div className="p-3 text-slate-500 text-sm">Không có người phù hợp bộ lọc.</div>
           )}
@@ -595,21 +633,12 @@ export default function AdminSurveyInviteManager() {
       <div className="space-y-2">
         <div className="font-semibold">4) Soạn email</div>
         <label className="block text-sm">Tiêu đề</label>
-        <input
-          className={INPUT}
-          value={emailSubject}
-          onChange={(e) => setEmailSubject(e.target.value)}
-        />
+        <input className={INPUT} value={emailSubject} onChange={(e) => setEmailSubject(e.target.value)} />
         <label className="block text-sm">
-          Nội dung HTML (hỗ trợ biến: <code>{'{{full_name}}'}</code>,{' '}
-          <code>{'{{email}}'}</code>, <code>{'{{project_list}}'}</code>,{' '}
-          <code>{'{{open_button}}'}</code>)
+          Nội dung HTML (hỗ trợ biến: <code>{'{{full_name}}'}</code>, <code>{'{{email}}'}</code>,{' '}
+          <code>{'{{project_list}}'}</code>, <code>{'{{open_button}}'}</code>)
         </label>
-        <textarea
-          className={INPUT + ' h-48 font-mono'}
-          value={emailHtml}
-          onChange={(e) => setEmailHtml(e.target.value)}
-        />
+        <textarea className={INPUT + ' h-48 font-mono'} value={emailHtml} onChange={(e) => setEmailHtml(e.target.value)} />
       </div>
 
       {/* 5) Preview */}
@@ -622,10 +651,10 @@ export default function AdminSurveyInviteManager() {
 
       {/* 6) Hành động */}
       <div className="flex items-center gap-3">
-        <button className={BTN} disabled={loading} onClick={() => act('invite')}>
+        <button className={BTN} disabled={loading} onClick={() => act('invite')} type="button">
           Mời (add + gửi)
         </button>
-        <button className={BTN2} disabled={loading} onClick={() => act('remind')}>
+        <button className={BTN2} disabled={loading} onClick={() => act('remind')} type="button">
           Nhắc (chỉ gửi)
         </button>
       </div>
@@ -634,11 +663,7 @@ export default function AdminSurveyInviteManager() {
       <div className="space-y-2">
         <div className="font-semibold">7) Tiến độ tham gia</div>
         <div className="flex flex-wrap items-center gap-3">
-          <select
-            className={INPUT + ' md:w-64'}
-            value={filterProject}
-            onChange={(e) => setFilterProject(e.target.value)}
-          >
+          <select className={INPUT + ' md:w-64'} value={filterProject} onChange={(e) => setFilterProject(e.target.value)}>
             <option value="">— Lọc theo Project —</option>
             {projects.map((p) => (
               <option key={p.id} value={p.id}>
@@ -646,19 +671,16 @@ export default function AdminSurveyInviteManager() {
               </option>
             ))}
           </select>
-          <select
-            className={INPUT + ' md:w-48'}
-            value={filterStatus}
-            onChange={(e) => setFilterStatus(e.target.value)}
-          >
+          <select className={INPUT + ' md:w-48'} value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}>
             <option value="">— Tất cả trạng thái —</option>
             <option value="submitted">Đã nộp</option>
             <option value="invited">Chưa nộp</option>
           </select>
-          <button className={BTN2} onClick={reloadProgress}>
+          <button className={BTN2} onClick={reloadProgress} type="button">
             Làm mới
           </button>
         </div>
+
         <div className="border rounded max-h-96 overflow-auto">
           <table className="min-w-full text-sm">
             <thead className="bg-slate-50">
@@ -683,19 +705,14 @@ export default function AdminSurveyInviteManager() {
                     {r.status === 'submitted' ? (
                       <span className="px-2 py-1 rounded bg-green-100 text-green-700">Đã nộp</span>
                     ) : (
-                      <span className="px-2 py-1 rounded bg-yellow-100 text-yellow-700">
-                        Chưa nộp
-                      </span>
+                      <span className="px-2 py-1 rounded bg-yellow-100 text-yellow-700">Chưa nộp</span>
                     )}
                   </td>
-                  <td className="p-2 text-center">
-                    {r.invited_at ? new Date(r.invited_at).toLocaleString() : '—'}
-                  </td>
-                  <td className="p-2 text-center">
-                    {r.responded_at ? new Date(r.responded_at).toLocaleString() : '—'}
-                  </td>
+                  <td className="p-2 text-center">{r.invited_at ? new Date(r.invited_at).toLocaleString() : '—'}</td>
+                  <td className="p-2 text-center">{r.responded_at ? new Date(r.responded_at).toLocaleString() : '—'}</td>
                 </tr>
               ))}
+
               {progress.length === 0 && (
                 <tr>
                   <td colSpan={6} className="p-4 text-center text-slate-500">
