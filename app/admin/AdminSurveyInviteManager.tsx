@@ -572,8 +572,8 @@ export default function AdminSurveyInviteManager() {
             Trang sau →
           </button>
 
-          <div className="ml-auto flex items-center gap-2">
-            <span className="text-sm text-slate-500">Đi tới:</span>
+          <div className="ml-auto flex items-center gap-2 whitespace-nowrap">
+            <span className="text-sm text-slate-500 shrink-0 whitespace-nowrap">Đi tới:</span>
             <input
               className={INPUT + ' w-24'}
               type="number"
@@ -581,7 +581,7 @@ export default function AdminSurveyInviteManager() {
               max={totalPages}
               value={page}
               onChange={(e) => setPage(Number(e.target.value) || 1)}
-            />
+              />
           </div>
         </div>
 
