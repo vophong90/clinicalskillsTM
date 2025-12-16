@@ -1,30 +1,27 @@
 'use client';
-import React, { useEffect, useMemo, useState } from 'react';
+
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 import { useRouter } from 'next/navigation';
-import type { Session } from '@supabase/supabase-js';
 
 type UserProfile = { id: string; email: string; name: string; role: string };
 type Project = { id: string; title: string };
-type Round = { id: string; project_id: string; round_number: number };
 type Permission = { id: string; user_id: string; project_id: string; role: string };
-type Participant = { id: string; user_id: string; round_id: string };
-type SurveyResponse = {
-  id: string;
-  user_id: string;
-  round_id: string;
-  is_submitted: boolean;
-  // bạn có thể thêm answer_json, updated_at nếu cần hiển thị
-};
 
 function translateRole(role: string) {
   switch (role) {
-    case 'admin': return 'Quản trị viên';
-    case 'secretary': return 'Thư ký hội đồng';
-    case 'viewer': return 'Quan sát viên';
-    case 'core_expert': return 'Chuyên gia nòng cốt';
-    case 'external_expert': return 'Chuyên gia bên ngoài';
-    default: return role;
+    case 'admin':
+      return 'Quản trị viên';
+    case 'secretary':
+      return 'Thư ký hội đồng';
+    case 'viewer':
+      return 'Quan sát viên';
+    case 'core_expert':
+      return 'Chuyên gia nòng cốt';
+    case 'external_expert':
+      return 'Chuyên gia bên ngoài';
+    default:
+      return role;
   }
 }
 
@@ -36,175 +33,180 @@ const SYSTEM_ROLES = [
   { value: 'external_expert', label: 'Chuyên gia bên ngoài' },
 ];
 
-async function fetchAllResponses(roundId: string): Promise<SurveyResponse[]> {
-  const PAGE = 1000;
-  let from = 0, to = PAGE - 1;
-  const all: SurveyResponse[] = [];
-
-  while (true) {
-    const { data, error } = await supabase
-      .from('responses')
-      .select('id, user_id, round_id, is_submitted')
-      .eq('round_id', roundId)
-      .order('user_id', { ascending: true }) // ổn định phân trang
-      .range(from, to);
-
-    if (error) throw error;
-    all.push(...(data ?? []));
-    if (!data || data.length < PAGE) break; // hết trang
-    from += PAGE; to += PAGE;
-  }
-  return all;
-}
+const INPUT =
+  'w-full border rounded-lg px-3 py-2 outline-none focus:border-blue-300 focus:ring-2 focus:ring-blue-200';
+const BTN_PRIMARY =
+  'inline-flex items-center px-4 py-2 rounded-lg font-semibold bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50';
+const BTN_SECONDARY =
+  'inline-flex items-center px-3 py-1.5 rounded-lg font-semibold bg-gray-100 text-gray-800 hover:bg-gray-200 disabled:opacity-50';
 
 export default function AdminUserManager() {
-  // ====== DATA STATE ======
   const router = useRouter();
+
+  // ====== DATA STATE ======
   const [users, setUsers] = useState<UserProfile[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
-  const [rounds, setRounds] = useState<Round[]>([]);
   const [permissions, setPermissions] = useState<Permission[]>([]);
-  const [participants, setParticipants] = useState<Participant[]>([]);
-  const [responses, setResponses] = useState<SurveyResponse[]>([]);
+
+  // ====== AUTH / PERMISSION ======
+  const [isAdmin, setIsAdmin] = useState<boolean>(false);
 
   // ====== UI STATE ======
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState<string>('');
 
-  async function waitForSession(): Promise<import('@supabase/supabase-js').Session> {
-    const { data: { session } } = await supabase.auth.getSession();
-    if (session) return session;
+  // ====== COMBOBOX STATE ======
+  const [filterSystemRole, setFilterSystemRole] = useState<string>('');
+  const [comboOpen, setComboOpen] = useState(false);
+  const [comboQuery, setComboQuery] = useState('');
+  const comboWrapRef = useRef<HTMLDivElement | null>(null);
 
-    return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error('No session')), 8000);
-      const { data: sub } = supabase.auth.onAuthStateChange((_evt, s) => {
-        if (s) {
-          clearTimeout(timer);
-          sub.subscription.unsubscribe();
-          resolve(s);
-        }
-      });
-    });
-  }
+  // ====== RESET PASSWORD STATE ======
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
+  const [resetting, setResetting] = useState(false);
 
-  // Filters cho BẢNG TỔNG HỢP
-  const [filterProject, setFilterProject] = useState('');
-  const [filterRound, setFilterRound] = useState('');
-  const [filterStatus, setFilterStatus] = useState<'Đã nộp' | 'Chưa nộp' | ''>('');
-
-  useEffect(() => {
-  (async () => {
-    if (!filterRound) {
-      setResponses([]); // reset nếu chưa chọn vòng
+  // ====== LOAD + CHECK ADMIN ======
+  async function checkAdmin() {
+    const { data, error } = await supabase.auth.getUser();
+    if (error || !data.user) {
+      setIsAdmin(false);
+      setMessage('Không xác định được người dùng hiện tại.');
       return;
     }
-    setLoading(true);
-    let cancelled = false;
-    try {
-      const all = await fetchAllResponses(filterRound);
-      if (!cancelled) setResponses(all);
-    } catch (e: any) {
-      if (!cancelled) {
-        setResponses([]);
-        setMessage('❌ Lỗi tải responses: ' + (e?.message ?? String(e)));
-      }
-    } finally {
-      if (!cancelled) setLoading(false);
-    }
-    return () => { cancelled = true; };
-  })();
-}, [filterRound]);
-;
 
-  // ====== LOAD DATA ======
+    const uid = data.user.id;
+    const { data: prof, error: profErr } = await supabase
+      .from('profiles')
+      .select('role')
+      .eq('id', uid)
+      .single();
+
+    if (profErr || !prof) {
+      setIsAdmin(false);
+      setMessage('Không lấy được thông tin profile.');
+      return;
+    }
+
+    if (prof.role === 'admin') {
+      setIsAdmin(true);
+    } else {
+      setIsAdmin(false);
+      setMessage('Bạn không có quyền quản lý người dùng / mật khẩu.');
+    }
+  }
+
   async function loadAll() {
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session) throw new Error('Not authenticated');
     setLoading(true);
+    setMessage('');
+
+    const { data: sess } = await supabase.auth.getSession();
+    if (!sess?.session) throw new Error('Not authenticated');
+
     const [
-      { data: profiles },
-      { data: projectsData },
-      { data: roundsData },
-      { data: permissionsData },
-      { data: participantsData },
+      { data: profiles, error: profErr },
+      { data: projectsData, error: projErr },
+      { data: permissionsData, error: permErr },
     ] = await Promise.all([
-      supabase.from('profiles').select('id, email, name, role'),
+      supabase.from('profiles').select('id, email, name, role').order('created_at', { ascending: false }),
       supabase.from('projects').select('id, title'),
-      supabase.from('rounds').select('id, project_id, round_number'),
       supabase.from('permissions').select('id, user_id, project_id, role'),
-      supabase.from('round_participants').select('id, user_id, round_id'),
     ]);
-    
+
+    if (profErr) throw profErr;
+    if (projErr) throw projErr;
+    if (permErr) throw permErr;
+
     setUsers((profiles as UserProfile[]) ?? []);
     setProjects((projectsData as Project[]) ?? []);
-    setRounds((roundsData as Round[]) ?? []);
     setPermissions((permissionsData as Permission[]) ?? []);
-    const pa = (participantsData as Participant[]) ?? [];
-    setParticipants(pa);
-    
+
     setLoading(false);
   }
-  
+
   useEffect(() => {
-  let cancelled = false;
-  (async () => {
-    try {
-      const session = await waitForSession(); // đợi có session
-      if (!session?.user) {
+    let cancelled = false;
+    (async () => {
+      try {
+        await checkAdmin();
+        const { data } = await supabase.auth.getSession();
+        if (!data.session) {
+          router.push('/login');
+          return;
+        }
+        if (!cancelled) await loadAll();
+      } catch {
         router.push('/login');
-        return;
       }
-      if (!cancelled) await loadAll();
-    } catch {
-      router.push('/login');
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // ====== OUTSIDE CLICK CLOSE COMBOBOX ======
+  useEffect(() => {
+    function onDown(e: MouseEvent) {
+      if (!comboWrapRef.current) return;
+      if (!comboWrapRef.current.contains(e.target as Node)) setComboOpen(false);
     }
-  })();
-  return () => { cancelled = true; };
-}, []);
+    document.addEventListener('mousedown', onDown);
+    return () => document.removeEventListener('mousedown', onDown);
+  }, []);
 
-  // ====== HELPERS ======
-  const selectedUser = users.find(u => u.id === selectedUserId) || null;
+  // ====== FILTERED USERS FOR COMBOBOX ======
+  const filteredUsers = useMemo(() => {
+    const q = comboQuery.trim().toLowerCase();
+    return users
+      .filter((u) => (filterSystemRole ? u.role === filterSystemRole : true))
+      .filter((u) => {
+        if (!q) return true;
+        const email = (u.email || '').toLowerCase();
+        const name = (u.name || '').toLowerCase();
+        return email.includes(q) || name.includes(q);
+      })
+      .slice(0, 50); // tránh list quá dài
+  }, [users, comboQuery, filterSystemRole]);
 
+  const selectedUser = useMemo(
+    () => users.find((u) => u.id === selectedUserId) || null,
+    [users, selectedUserId]
+  );
+
+  // Khi chọn user -> set input hiển thị và đóng list
+  function selectUser(u: UserProfile) {
+    setSelectedUserId(u.id);
+    setComboQuery(`${u.name || u.email} (${u.email})`);
+    setComboOpen(false);
+  }
+
+  // Nếu đổi filter / query làm mất selectedUser thì reset selection
+  useEffect(() => {
+    if (!selectedUserId) return;
+    const stillExists = users.some((u) => u.id === selectedUserId);
+    if (!stillExists) setSelectedUserId(null);
+  }, [users, selectedUserId]);
+
+  // ====== HELPERS: PROJECT PERMISSIONS ======
   const userProjects = useMemo(() => {
     if (!selectedUserId) return [];
     return permissions
-      .filter(p => p.user_id === selectedUserId)
-      .map(p => ({
+      .filter((p) => p.user_id === selectedUserId)
+      .map((p) => ({
         permission_id: p.id,
         project_id: p.project_id,
-        title: projects.find(pr => pr.id === p.project_id)?.title || '',
+        title: projects.find((pr) => pr.id === p.project_id)?.title || '',
         role: p.role,
       }));
   }, [permissions, projects, selectedUserId]);
 
-  const userRounds = useMemo(() => {
-    if (!selectedUserId) return [];
-    return participants
-      .filter(pa => pa.user_id === selectedUserId)
-      .map(pa => ({ participant_id: pa.id, round_id: pa.round_id }));
-  }, [participants, selectedUserId]);
-
   const availableProjects = useMemo(
-    () => projects.filter(pr => !userProjects.some(up => up.project_id === pr.id)),
+    () => projects.filter((pr) => !userProjects.some((up) => up.project_id === pr.id)),
     [projects, userProjects]
   );
 
-  const availableRounds = useMemo(
-    () => rounds.filter(r => !userRounds.some(ur => ur.round_id === r.id)),
-    [rounds, userRounds]
-  );
-
-  // Map nhanh trạng thái đã nộp: Set("userId:roundId")
-  const submittedSet = useMemo(() => {
-    const s = new Set<string>();
-    responses.forEach(r => {
-      if (r.is_submitted) s.add(`${r.user_id}:${r.round_id}`);
-    });
-    return s;
-  }, [responses]);
-
-  // ====== ACTIONS ======
+  // ====== ACTIONS: SYSTEM ROLE ======
   async function changeUserRole(newRole: string) {
     if (!selectedUserId) return;
     const { error } = await supabase.from('profiles').update({ role: newRole }).eq('id', selectedUserId);
@@ -212,6 +214,7 @@ export default function AdminUserManager() {
     await loadAll();
   }
 
+  // ====== ACTIONS: PROJECT PERMISSIONS ======
   async function addUserToProject(projectId: string, projectRole: string = 'viewer') {
     if (!selectedUserId) return;
     const { error } = await supabase.from('permissions').insert([
@@ -233,363 +236,371 @@ export default function AdminUserManager() {
     await loadAll();
   }
 
-  async function addUserToRound(roundId: string) {
-    if (!selectedUserId) return;
-    const { error } = await supabase.from('round_participants').insert([
-      { id: crypto.randomUUID(), user_id: selectedUserId, round_id: roundId },
-    ]);
-    setMessage(error ? '❌ Lỗi thêm vào round: ' + error.message : '✅ Đã thêm user vào round!');
-    await loadAll();
-  }
-
-  async function removeUserFromRound(participantId: string) {
-    const { error } = await supabase.from('round_participants').delete().eq('id', participantId);
-    setMessage(error ? '❌ Lỗi xóa round: ' + error.message : '🗑️ Đã xóa user khỏi round!');
-    await loadAll();
-  }
-
-  // ====== BẢNG TỔNG HỢP ======
-  const filteredRounds = useMemo(
-    () => (filterProject ? rounds.filter(r => r.project_id === filterProject) : rounds),
-    [rounds, filterProject]
-  );
-
-  const submissionTable = useMemo(() => {
-    const rows = participants.map(pa => {
-      const round = rounds.find(r => r.id === pa.round_id);
-      const project = round ? projects.find(p => p.id === round.project_id) : undefined;
-      const user = users.find(u => u.id === pa.user_id);
-      const hasSubmitted = submittedSet.has(`${pa.user_id}:${pa.round_id}`);
-      return {
-        userId: pa.user_id,
-        userName: user?.name || user?.email || '',
-        projectId: project?.id || '',
-        projectTitle: project?.title || '',
-        roundId: round?.id || '',
-        roundNumber: round?.round_number || 0,
-        status: hasSubmitted ? 'Đã nộp' as const : 'Chưa nộp' as const,
-      };
+  // ====== RESET PASSWORD (multi-select) ======
+  function toggleSelect(id: string) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
     });
-    
-    const seen = new Set(rows.map(r => `${r.userId}:${r.roundId}`));
-    
-    responses.forEach(resp => {
-      if (resp.is_submitted) {
-        const key = `${resp.user_id}:${resp.round_id}`;
-        if (!seen.has(key)) {
-          const round = rounds.find(r => r.id === resp.round_id);
-          const project = round ? projects.find(p => p.id === round.project_id) : undefined;
-          const user = users.find(u => u.id === resp.user_id);
-          rows.push({
-            userId: resp.user_id,
-            userName: user?.name || user?.email || '',
-            projectId: project?.id || '',
-            projectTitle: project?.title || '',
-            roundId: round?.id || '',
-            roundNumber: round?.round_number || 0,
-            status: 'Đã nộp' as const,
-          });
-          seen.add(key);
-        }
+  }
+
+  function toggleSelectAll(list: UserProfile[]) {
+    setSelectedIds((prev) => {
+      const allIds = list.map((u) => u.id);
+      const allSelected = allIds.length > 0 && allIds.every((id) => prev.has(id));
+      return allSelected ? new Set() : new Set(allIds);
+    });
+  }
+
+  async function handleResetPasswords() {
+    setMessage('');
+
+    if (selectedIds.size === 0) {
+      setMessage('Vui lòng chọn ít nhất 1 người dùng.');
+      return;
+    }
+
+    const ok = window.confirm(
+      `Bạn chắc chắn muốn reset mật khẩu về "12345678@" cho ${selectedIds.size} tài khoản?`
+    );
+    if (!ok) return;
+
+    setResetting(true);
+    try {
+      const res = await fetch('/api/admin/reset-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ profile_ids: Array.from(selectedIds) }),
+      });
+
+      const json = await res.json();
+      if (!res.ok) {
+        setMessage(json.error || 'Reset mật khẩu thất bại. Vui lòng kiểm tra lại cấu hình.');
+      } else {
+        setMessage(`✅ Đã reset mật khẩu cho ${json.success} tài khoản. Thất bại: ${json.failed}.`);
+        setSelectedIds(new Set()); // reset chọn
       }
-    });
-    
-    return rows.filter(r => {
-      if (filterProject && r.projectId !== filterProject) return false;
-      if (filterRound && r.roundId !== filterRound) return false;
-      if (filterStatus && r.status !== filterStatus) return false;
-      return true;
-    });
-  }, [participants, rounds, projects, users, submittedSet, filterProject, filterRound, filterStatus]);
+    } catch (e) {
+      console.error(e);
+      setMessage('Lỗi mạng khi gọi API reset mật khẩu.');
+    } finally {
+      setResetting(false);
+    }
+  }
+
+  // ====== UI: danh sách hiển thị trong bảng reset ======
+  // Ưu tiên: nếu đang chọn roleFilter hoặc đang gõ query -> hiển thị theo filteredUsers;
+  // nếu không -> hiển thị 100 user mới nhất (đỡ quá dài)
+  const resetList = useMemo(() => {
+    const hasFilter = !!filterSystemRole || !!comboQuery.trim();
+    if (hasFilter) return filteredUsers;
+    return users.slice(0, 100);
+  }, [users, filteredUsers, filterSystemRole, comboQuery]);
+
+  // ====== GUARD ======
+  if (!isAdmin) {
+    return (
+      <div className="max-w-3xl mx-auto py-10 px-4">
+        <h1 className="text-2xl font-bold mb-3">Quản lý người dùng</h1>
+        <p className="text-sm text-red-600">{message || 'Bạn không có quyền truy cập chức năng này.'}</p>
+      </div>
+    );
+  }
 
   // ====== RENDER ======
   return (
     <div className="max-w-6xl mx-auto py-10 px-4 space-y-10">
-      {/* ===================== SECTION 1: QUẢN LÝ NGƯỜI DÙNG ===================== */}
       <section>
-        <h2 className="text-3xl font-extrabold mb-6 flex items-center gap-3 text-indigo-800">
-          <span className="inline-block rounded bg-indigo-100 p-2">
-            <svg width="28" height="28" fill="none">
-              <path
-                d="M14 16c-2.5 0-7 1.25-7 3.75V21h14v-1.25C21 17.25 16.5 16 14 16ZM14 14a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z"
-                stroke="#4338ca"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </svg>
-          </span>
-          Quản lý người dùng
-        </h2>
+        <header className="border-b pb-3 mb-6">
+          <h2 className="text-3xl font-extrabold text-indigo-800">Quản lý người dùng</h2>
+          <p className="text-sm text-gray-600 mt-1">
+            Chọn user bằng combobox (gõ để lọc), phân quyền dự án, và reset mật khẩu về{' '}
+            <code className="px-1.5 py-0.5 bg-gray-100 rounded text-xs">12345678@</code>.
+          </p>
+        </header>
 
         {message && (
-          <div className="mb-6 text-center py-2 rounded bg-green-50 text-green-700 shadow">{message}</div>
+          <div className="mb-6 text-center py-2 rounded bg-green-50 text-green-700 shadow">
+            {message}
+          </div>
         )}
 
-        <div className="mb-8 flex flex-col gap-6 items-stretch">
-          {/* Dropdown chọn user */}
+        {/* ========== COMBOBOX + FILTER ROLE ========== */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-start mb-8">
+          <div className="md:col-span-2" ref={comboWrapRef}>
+            <label className="block font-semibold mb-2 text-gray-700">Chọn người dùng (Combobox):</label>
+
+            <div className="relative">
+              <input
+                className={INPUT}
+                placeholder="Gõ email hoặc họ tên để lọc…"
+                value={comboQuery}
+                onChange={(e) => {
+                  setComboQuery(e.target.value);
+                  setComboOpen(true);
+                }}
+                onFocus={() => setComboOpen(true)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Escape') setComboOpen(false);
+                }}
+              />
+
+              {comboOpen && (
+                <div className="absolute z-20 mt-2 w-full bg-white border rounded-xl shadow-lg max-h-72 overflow-auto">
+                  {filteredUsers.length === 0 ? (
+                    <div className="px-3 py-2 text-sm text-gray-500">Không có kết quả phù hợp.</div>
+                  ) : (
+                    <ul className="py-1">
+                      {filteredUsers.map((u) => (
+                        <li key={u.id}>
+                          <button
+                            type="button"
+                            className="w-full text-left px-3 py-2 hover:bg-blue-50 flex items-center justify-between gap-3"
+                            onClick={() => selectUser(u)}
+                          >
+                            <div className="min-w-0">
+                              <div className="font-semibold text-gray-900 truncate">
+                                {u.name || '(chưa có tên)'}
+                              </div>
+                              <div className="text-xs text-gray-600 truncate">{u.email}</div>
+                            </div>
+                            <span className="text-xs inline-flex px-2 py-0.5 rounded bg-gray-100 text-gray-700">
+                              {translateRole(u.role)}
+                            </span>
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-center gap-2 mt-3">
+              <button
+                className={BTN_SECONDARY}
+                onClick={() => {
+                  setSelectedUserId(null);
+                  setComboQuery('');
+                  setComboOpen(false);
+                }}
+              >
+                Xóa chọn
+              </button>
+
+              <div className="text-xs text-gray-500">
+                {filterSystemRole || comboQuery.trim()
+                  ? `Đang lọc: ${filteredUsers.length} kết quả`
+                  : `Tổng user: ${users.length}`}
+              </div>
+            </div>
+          </div>
+
           <div>
-            <label className="block font-semibold mb-2 text-gray-700">Chọn người dùng:</label>
+            <label className="block font-semibold mb-2 text-gray-700">Lọc theo quyền hệ thống:</label>
             <select
-              value={selectedUserId ?? ''}
-              onChange={e => setSelectedUserId(e.target.value || null)}
-              className="w-full border border-gray-300 rounded px-3 py-2 shadow bg-white"
+              className={INPUT}
+              value={filterSystemRole}
+              onChange={(e) => {
+                setFilterSystemRole(e.target.value);
+                setComboOpen(true);
+              }}
             >
-              <option value="">-- Chọn user --</option>
-              {users.map(u => (
-                <option key={u.id} value={u.id}>
-                  {u.name || u.email} ({u.email})
+              <option value="">— Tất cả quyền —</option>
+              {SYSTEM_ROLES.map((r) => (
+                <option key={r.value} value={r.value}>
+                  {r.label}
                 </option>
               ))}
             </select>
           </div>
+        </div>
 
-          {/* Card thông tin user */}
-          {selectedUser && (
-            <div className="w-full border rounded-2xl p-6 bg-white shadow-xl min-w-[350px] space-y-6">
-              {/* Thông tin user */}
-              <div>
-                <div className="mb-1 text-gray-700">
-                  <b className="mr-2">Email:</b>
-                  <span className="font-mono text-indigo-800">{selectedUser.email}</span>
-                </div>
-                <div className="mb-1 text-gray-700">
-                  <b className="mr-2">Tên:</b>
-                  <span>{selectedUser.name}</span>
-                </div>
-                <div className="flex items-center mt-2">
-                  <b>Quyền hệ thống:</b>
-                  <select
-                    className="ml-2 border border-gray-300 rounded px-2 py-1 bg-gray-50 text-indigo-800"
-                    value={selectedUser.role}
-                    onChange={e => changeUserRole(e.target.value)}
-                  >
-                    {SYSTEM_ROLES.map(r => (
-                      <option key={r.value} value={r.value}>
-                        {r.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+        {/* ========== USER CARD ========== */}
+        {selectedUser && (
+          <div className="w-full border rounded-2xl p-6 bg-white shadow-xl space-y-6">
+            <div>
+              <div className="mb-1 text-gray-700">
+                <b className="mr-2">Email:</b>
+                <span className="font-mono text-indigo-800">{selectedUser.email}</span>
               </div>
-
-              {/* Phân quyền dự án */}
-              <div className="border-t pt-4">
-                <div className="flex items-center justify-between mb-2">
-                  <b className="text-gray-800">Phân quyền dự án:</b>
-                  <select
-                    className="border rounded px-2 py-1 bg-gray-100 text-gray-800 text-sm"
-                    defaultValue=""
-                    onChange={e => {
-                      const pid = e.target.value;
-                      if (pid) addUserToProject(pid);
-                      e.target.selectedIndex = 0;
-                    }}
-                  >
-                    <option value="">+ Thêm vào Project</option>
-                    {availableProjects.map(p => (
-                      <option key={p.id} value={p.id}>
-                        {p.title}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <ul className="mt-2 space-y-1">
-                  {userProjects.length === 0 && (
-                    <li className="text-gray-400 italic">Chưa thuộc project nào.</li>
-                  )}
-                  {userProjects.map(p => (
-                    <li
-                      key={p.permission_id}
-                      className="flex flex-wrap md:flex-nowrap items-center justify-between gap-2 bg-gray-50 rounded px-3 py-2"
-                    >
-                      <span>
-                        <b>{p.title}</b>
-                      </span>
-                      <span className="flex items-center gap-2">
-                        <select
-                          className="border rounded px-2 py-1 bg-indigo-50 text-indigo-800 text-xs font-semibold"
-                          value={p.role}
-                          onChange={e => changeProjectRole(p.permission_id, e.target.value)}
-                        >
-                          {SYSTEM_ROLES.filter(r => r.value !== 'admin').map(r => (
-                            <option key={r.value} value={r.value}>
-                              {r.label}
-                            </option>
-                          ))}
-                        </select>
-                        <span className="inline-block px-2 py-0.5 rounded bg-indigo-100 text-indigo-800 text-xs font-semibold">
-                          {translateRole(p.role)}
-                        </span>
-                        <button
-                          className="text-red-500 text-xs font-bold hover:underline hover:text-red-700 ml-2"
-                          onClick={() => removeUserFromProject(p.permission_id)}
-                        >
-                          Xóa
-                        </button>
-                      </span>
-                    </li>
+              <div className="mb-1 text-gray-700">
+                <b className="mr-2">Tên:</b>
+                <span>{selectedUser.name}</span>
+              </div>
+              <div className="flex items-center mt-2">
+                <b>Quyền hệ thống:</b>
+                <select
+                  className="ml-2 border border-gray-300 rounded px-2 py-1 bg-gray-50 text-indigo-800"
+                  value={selectedUser.role}
+                  onChange={(e) => changeUserRole(e.target.value)}
+                >
+                  {SYSTEM_ROLES.map((r) => (
+                    <option key={r.value} value={r.value}>
+                      {r.label}
+                    </option>
                   ))}
-                </ul>
-              </div>
-
-              {/* Quản lý round */}
-              <div className="border-t pt-4">
-                <div className="flex items-center justify-between mb-2">
-                  <b className="text-gray-800">Tham gia round:</b>
-                  <select
-                    className="border rounded px-2 py-1 bg-gray-100 text-gray-800 text-sm"
-                    defaultValue=""
-                    onChange={e => {
-                      const rid = e.target.value;
-                      if (rid) addUserToRound(rid);
-                      e.target.selectedIndex = 0;
-                    }}
-                  >
-                    <option value="">+ Thêm vào Round</option>
-                    {availableRounds.map(r => (
-                      <option key={r.id} value={r.id}>
-                        {projects.find(p => p.id === r.project_id)?.title || '---'} - V{r.round_number}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <ul className="mt-2 space-y-1">
-                  {userRounds.length === 0 && (
-                    <li className="text-gray-400 italic">Chưa tham gia round nào.</li>
-                  )}
-                  {userRounds.map(ur => {
-                    const round = rounds.find(r => r.id === ur.round_id);
-                    const project = round && projects.find(p => p.id === round.project_id);
-                    const hasSubmitted = submittedSet.has(`${selectedUserId}:${ur.round_id}`);
-                    return (
-                      <li
-                        key={ur.participant_id}
-                        className="flex items-center justify-between bg-gray-50 rounded px-3 py-2"
-                      >
-                        <span>
-                          <b>{project?.title || ''} - V{round?.round_number}</b>
-                          {hasSubmitted ? (
-                            <span className="ml-2 inline-flex items-center gap-1 px-2 py-0.5 rounded bg-green-100 text-green-700 text-xs font-semibold">
-                              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                              </svg>
-                              Đã nộp
-                            </span>
-                          ) : (
-                            <span className="ml-2 inline-flex items-center gap-1 px-2 py-0.5 rounded bg-yellow-100 text-yellow-700 text-xs font-semibold">
-                              <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v4m0 4h.01M12 2a10 10 0 100 20 10 10 0 000-20z" />
-                              </svg>
-                              Chưa nộp
-                            </span>
-                          )}
-                        </span>
-                        <button
-                          className="text-red-500 text-sm font-bold hover:underline hover:text-red-700"
-                          onClick={() => removeUserFromRound(ur.participant_id)}
-                        >
-                          Xóa
-                        </button>
-                      </li>
-                    );
-                  })}
-                </ul>
+                </select>
               </div>
             </div>
-          )}
-        </div>
+
+            {/* Phân quyền dự án */}
+            <div className="border-t pt-4">
+              <div className="flex items-center justify-between mb-2">
+                <b className="text-gray-800">Phân quyền dự án:</b>
+                <select
+                  className="border rounded px-2 py-1 bg-gray-100 text-gray-800 text-sm"
+                  defaultValue=""
+                  onChange={(e) => {
+                    const pid = e.target.value;
+                    if (pid) addUserToProject(pid);
+                    e.target.selectedIndex = 0;
+                  }}
+                >
+                  <option value="">+ Thêm vào Project</option>
+                  {availableProjects.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.title}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <ul className="mt-2 space-y-1">
+                {userProjects.length === 0 && (
+                  <li className="text-gray-400 italic">Chưa thuộc project nào.</li>
+                )}
+
+                {userProjects.map((p) => (
+                  <li
+                    key={p.permission_id}
+                    className="flex flex-wrap md:flex-nowrap items-center justify-between gap-2 bg-gray-50 rounded px-3 py-2"
+                  >
+                    <span>
+                      <b>{p.title}</b>
+                    </span>
+
+                    <span className="flex items-center gap-2">
+                      <select
+                        className="border rounded px-2 py-1 bg-indigo-50 text-indigo-800 text-xs font-semibold"
+                        value={p.role}
+                        onChange={(e) => changeProjectRole(p.permission_id, e.target.value)}
+                      >
+                        {SYSTEM_ROLES.filter((r) => r.value !== 'admin').map((r) => (
+                          <option key={r.value} value={r.value}>
+                            {r.label}
+                          </option>
+                        ))}
+                      </select>
+
+                      <span className="inline-block px-2 py-0.5 rounded bg-indigo-100 text-indigo-800 text-xs font-semibold">
+                        {translateRole(p.role)}
+                      </span>
+
+                      <button
+                        className="text-red-500 text-xs font-bold hover:underline hover:text-red-700 ml-2"
+                        onClick={() => removeUserFromProject(p.permission_id)}
+                      >
+                        Xóa
+                      </button>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+
+            {/* ✅ Đã bỏ "Tham gia round" theo yêu cầu trước */}
+          </div>
+        )}
 
         {loading && <div className="text-gray-500 mt-6">Đang tải dữ liệu...</div>}
       </section>
 
-      {/* ===================== SECTION 2: BẢNG TỔNG HỢP NỘP KHẢO SÁT ===================== */}
-      <section>
-        <h3 className="text-2xl font-bold mb-4">📋 Bảng theo dõi tiến độ tham gia khảo sát</h3>
+      {/* ===================== RESET PASSWORD SECTION ===================== */}
+      <section className="space-y-4">
+        <header className="border-b pb-3">
+          <h3 className="text-2xl font-bold">Quản lý mật khẩu</h3>
+          <p className="text-sm text-gray-600 mt-1">
+            Chọn nhiều tài khoản và reset mật khẩu về mặc định{' '}
+            <code className="px-1.5 py-0.5 bg-gray-100 rounded text-xs">12345678@</code>.
+            Danh sách bên dưới sẽ bám theo bộ lọc (quyền hệ thống + từ khóa combobox).
+          </p>
+        </header>
 
-        {/* Bộ lọc */}
-        <div className="mb-4 flex flex-wrap items-center gap-3 border p-3 rounded bg-gray-50">
-          <select
-            className="border p-2 rounded min-w-48"
-            value={filterProject}
-            onChange={e => {
-              setFilterProject(e.target.value);
-              setFilterRound(''); // reset round khi đổi project
-            }}
-          >
-            <option value="">— Lọc theo Project —</option>
-            {projects.map(p => (
-              <option key={p.id} value={p.id}>
-                {p.title}
-              </option>
-            ))}
-          </select>
+        <div className="bg-white border rounded-xl p-4 space-y-3">
+          <div className="flex items-center justify-between flex-wrap gap-3">
+            <h4 className="text-lg font-semibold">
+              Danh sách ({resetList.length} tài khoản)
+            </h4>
 
-          <select
-            className="border p-2 rounded min-w-48"
-            value={filterRound}
-            onChange={e => setFilterRound(e.target.value)}
-          >
-            <option value="">— Lọc theo Vòng —</option>
-            {filteredRounds
-              .slice()
-              .sort((a, b) => a.round_number - b.round_number)
-              .map(r => (
-                <option key={r.id} value={r.id}>
-                  {(projects.find(p => p.id === r.project_id)?.title ?? 'Project')} – V{r.round_number}
-                </option>
-              ))}
-          </select>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => toggleSelectAll(resetList)}
+                className={BTN_SECONDARY}
+                disabled={resetList.length === 0}
+              >
+                {resetList.length > 0 && resetList.every((u) => selectedIds.has(u.id))
+                  ? 'Bỏ chọn tất cả'
+                  : 'Chọn tất cả'}
+              </button>
 
-          <select
-            className="border p-2 rounded min-w-40"
-            value={filterStatus}
-            onChange={e => setFilterStatus(e.target.value as any)}
-          >
-            <option value="">— Lọc theo Trạng thái —</option>
-            <option value="Đã nộp">Đã nộp</option>
-            <option value="Chưa nộp">Chưa nộp</option>
-          </select>
+              <button
+                onClick={handleResetPasswords}
+                className={BTN_PRIMARY}
+                disabled={resetting || selectedIds.size === 0}
+              >
+                {resetting ? 'Đang reset…' : `Reset mật khẩu (${selectedIds.size})`}
+              </button>
+            </div>
+          </div>
+
+          {resetList.length === 0 ? (
+            <p className="text-sm text-gray-600">Không có dữ liệu theo bộ lọc hiện tại.</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="min-w-full text-sm">
+                <thead>
+                  <tr className="border-b bg-gray-50">
+                    <th className="px-2 py-1 text-left w-10">
+                      <input
+                        type="checkbox"
+                        checked={resetList.length > 0 && resetList.every((u) => selectedIds.has(u.id))}
+                        onChange={() => toggleSelectAll(resetList)}
+                      />
+                    </th>
+                    <th className="px-2 py-1 text-left">Họ tên</th>
+                    <th className="px-2 py-1 text-left">Email</th>
+                    <th className="px-2 py-1 text-left">Vai trò</th>
+                  </tr>
+                </thead>
+
+                <tbody>
+                  {resetList.map((u) => {
+                    const checked = selectedIds.has(u.id);
+                    return (
+                      <tr key={u.id} className="border-b last:border-0">
+                        <td className="px-2 py-1">
+                          <input type="checkbox" checked={checked} onChange={() => toggleSelect(u.id)} />
+                        </td>
+                        <td className="px-2 py-1">
+                          {u.name || <span className="text-gray-400">(chưa có tên)</span>}
+                        </td>
+                        <td className="px-2 py-1">{u.email}</td>
+                        <td className="px-2 py-1 text-xs">
+                          <span className="inline-flex px-2 py-0.5 rounded bg-gray-100 text-gray-700">
+                            {translateRole(u.role)}
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
-
-        {/* Bảng */}
-        {loading ? (
-          <div>Đang tải...</div>
-        ) : (
-          <table className="min-w-full border text-sm bg-white shadow">
-            <thead>
-              <tr className="bg-gray-100">
-                <th className="p-2 border">Thành viên</th>
-                <th className="p-2 border">Project</th>
-                <th className="p-2 border">Vòng</th>
-                <th className="p-2 border">Trạng thái</th>
-              </tr>
-            </thead>
-            <tbody>
-              {submissionTable.map((row, idx) => (
-                <tr key={`${row.userId}-${row.roundId}-${idx}`} className="border-t">
-                  <td className="p-2 border">{row.userName}</td>
-                  <td className="p-2 border">{row.projectTitle}</td>
-                  <td className="p-2 border">V{row.roundNumber}</td>
-                  <td className="p-2 border">
-                    {row.status === 'Đã nộp' ? (
-                      <span className="px-2 py-1 rounded bg-green-100 text-green-700">Đã nộp</span>
-                    ) : (
-                      <span className="px-2 py-1 rounded bg-yellow-100 text-yellow-700">Chưa nộp</span>
-                    )}
-                  </td>
-                </tr>
-              ))}
-              {submissionTable.length === 0 && (
-                <tr>
-                  <td className="p-4 text-center text-gray-500" colSpan={4}>
-                    Không có dữ liệu phù hợp bộ lọc.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        )}
       </section>
     </div>
   );
