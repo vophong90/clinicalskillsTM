@@ -1009,16 +1009,16 @@ export default function AdminItemManager() {
 
                   {/* actions */}
                   <div className="shrink-0 flex items-center gap-2">
+                   <button
+                     className="px-2 py-1 rounded text-xs bg-blue-600 text-white hover:opacity-90"
+                     onClick={() => openEditModal(i)}
+                     >
+                     Sửa
+                   </button>
                     <button
-                      className="px-3 py-2 rounded bg-blue-600 text-white"
-                      onClick={() => openEditModal(i)}
-                    >
-                      Sửa
-                    </button>
-                    <button
-                      className="px-3 py-2 rounded bg-red-600 text-white"
+                      className="px-2 py-1 rounded text-xs bg-red-600 text-white hover:opacity-90"
                       onClick={() => deleteOneItem(i)}
-                    >
+                      >
                       Xóa
                     </button>
                   </div>
