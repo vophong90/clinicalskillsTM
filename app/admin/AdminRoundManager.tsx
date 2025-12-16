@@ -25,6 +25,9 @@ const BTN_SECONDARY =
 const BTN_DANGER =
   'inline-flex items-center px-3 py-2 rounded-lg font-semibold bg-red-600 text-white hover:bg-red-700 disabled:opacity-50';
 
+const COMPACT_INPUT =
+  'w-full border rounded-md px-2 py-1 text-sm outline-none focus:border-blue-300 focus:ring-2 focus:ring-blue-200';
+
 const ROUND_PAGE_SIZE = 10;
 const PROJECT_PICKER_PAGE_SIZE = 10;
 
@@ -78,6 +81,15 @@ function parseLocalDT(value: string) {
   return d.toISOString();
 }
 
+function fmtMaybeDT(value: string | null) {
+  if (!value) return '—';
+  try {
+    return new Date(value).toLocaleString();
+  } catch {
+    return value;
+  }
+}
+
 export default function AdminRoundManager() {
   // ===== DATA =====
   const [projects, setProjects] = useState<Project[]>([]);
@@ -124,7 +136,7 @@ export default function AdminRoundManager() {
   const [projectCreatedTo, setProjectCreatedTo] = useState<string>(''); // YYYY-MM-DD
   const [projectPage, setProjectPage] = useState(1);
 
-  // ===== INLINE EDIT (ROUND LIST) =====
+  // ===== DRAFTS (ROUND LIST) =====
   const [drafts, setDrafts] = useState<
     Record<
       string,
@@ -132,12 +144,27 @@ export default function AdminRoundManager() {
         round_number: number;
         status: string;
         description: string;
-        open_at: string;
-        close_at: string;
+        open_at: string; // datetime-local
+        close_at: string; // datetime-local
       }
     >
   >({});
   const [savingId, setSavingId] = useState('');
+
+  // ===== MODAL EDIT =====
+  const [editingId, setEditingId] = useState<string>(''); // round id
+  const [editForm, setEditForm] = useState<{
+    round_number: number;
+    status: string;
+    description: string;
+    open_at: string;
+    close_at: string;
+  } | null>(null);
+
+  const editingRound = useMemo(() => {
+    if (!editingId) return null;
+    return rounds.find((r) => r.id === editingId) ?? null;
+  }, [editingId, rounds]);
 
   // ===== helpers =====
   const projectTitleById = useMemo(() => {
@@ -380,9 +407,9 @@ export default function AdminRoundManager() {
   }
 
   // ===== UPDATE / DELETE =====
-  async function updateRound(id: string) {
+  async function updateRound(id: string, nextDraft?: (typeof drafts)[string]) {
     setMessage('');
-    const d = drafts[id];
+    const d = nextDraft ?? drafts[id];
     if (!d) return;
 
     setSavingId(id);
@@ -420,6 +447,55 @@ export default function AdminRoundManager() {
     await loadRounds(nextPage);
   }
 
+  // ===== modal helpers =====
+  function openEditModal(roundId: string) {
+    const r = rounds.find((x) => x.id === roundId);
+    if (!r) return;
+
+    const base = drafts[roundId] ?? {
+      round_number: r.round_number,
+      status: r.status,
+      description: r.description ?? '',
+      open_at: formatLocalDT(r.open_at),
+      close_at: formatLocalDT(r.close_at),
+    };
+
+    setEditForm({ ...base });
+    setEditingId(roundId);
+  }
+
+  function closeEditModal() {
+    setEditingId('');
+    setEditForm(null);
+  }
+
+  async function saveEditModal() {
+    if (!editingId || !editForm) return;
+
+    // sync drafts -> giữ logic cũ (dirty check dùng drafts)
+    setDrafts((prev) => ({
+      ...prev,
+      [editingId]: {
+        round_number: Math.max(1, Number(editForm.round_number || 1)),
+        status: editForm.status,
+        description: editForm.description ?? '',
+        open_at: editForm.open_at ?? '',
+        close_at: editForm.close_at ?? '',
+      },
+    }));
+
+    // gọi update ngay
+    await updateRound(editingId, {
+      round_number: Math.max(1, Number(editForm.round_number || 1)),
+      status: editForm.status,
+      description: editForm.description ?? '',
+      open_at: editForm.open_at ?? '',
+      close_at: editForm.close_at ?? '',
+    });
+
+    closeEditModal();
+  }
+
   return (
     <div className="max-w-6xl mx-auto py-8 px-4 space-y-6">
       <header className="flex items-center justify-between flex-wrap gap-3">
@@ -429,9 +505,7 @@ export default function AdminRoundManager() {
         </div>
       </header>
 
-      {message && (
-        <div className="rounded-xl border bg-green-50 text-green-700 px-4 py-3">{message}</div>
-      )}
+      {message && <div className="rounded-xl border bg-green-50 text-green-700 px-4 py-3">{message}</div>}
 
       {/* ===== CREATE multi-project ===== */}
       <section className="bg-white border rounded-2xl p-5 space-y-4 shadow-sm">
@@ -451,26 +525,15 @@ export default function AdminRoundManager() {
 
           <div>
             <label className="text-sm text-gray-600">Ngày tạo project từ</label>
-            <input
-              className={INPUT}
-              type="date"
-              value={projectCreatedFrom}
-              onChange={(e) => setProjectCreatedFrom(e.target.value)}
-            />
+            <input className={INPUT} type="date" value={projectCreatedFrom} onChange={(e) => setProjectCreatedFrom(e.target.value)} />
           </div>
 
           <div>
             <label className="text-sm text-gray-600">Ngày tạo project đến</label>
-            <input
-              className={INPUT}
-              type="date"
-              value={projectCreatedTo}
-              onChange={(e) => setProjectCreatedTo(e.target.value)}
-            />
+            <input className={INPUT} type="date" value={projectCreatedTo} onChange={(e) => setProjectCreatedTo(e.target.value)} />
           </div>
         </div>
 
-        {/* Selected count + actions */}
         <div className="flex items-center justify-between flex-wrap gap-2">
           <div className="text-sm text-gray-700">
             Đã chọn: <b>{selectedProjectIds.size}</b> project
@@ -484,18 +547,12 @@ export default function AdminRoundManager() {
             >
               Chọn tất cả
             </button>
-            <button
-              type="button"
-              className={BTN_SECONDARY}
-              onClick={clearSelectedProjects}
-              disabled={selectedProjectIds.size === 0}
-            >
+            <button type="button" className={BTN_SECONDARY} onClick={clearSelectedProjects} disabled={selectedProjectIds.size === 0}>
               Bỏ chọn tất cả
             </button>
           </div>
         </div>
 
-        {/* Project checklist (10 items/page) */}
         <div className="border rounded-xl p-3 bg-gray-50">
           {loadingProjects ? (
             <div className="text-sm text-gray-500">Đang tải project…</div>
@@ -507,10 +564,7 @@ export default function AdminRoundManager() {
                 {projectPageItems.map((p) => {
                   const checked = selectedProjectIds.has(p.id);
                   return (
-                    <label
-                      key={p.id}
-                      className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-white"
-                    >
+                    <label key={p.id} className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-white">
                       <input type="checkbox" checked={checked} onChange={() => toggleProject(p.id)} />
                       <span className="text-sm">{p.title}</span>
                     </label>
@@ -523,20 +577,10 @@ export default function AdminRoundManager() {
                   Tổng: <b>{filteredProjects.length}</b> | Trang <b>{projectPage}</b>/{projectTotalPages}
                 </div>
                 <div className="flex items-center gap-2">
-                  <button
-                    className={BTN_SECONDARY}
-                    type="button"
-                    disabled={projectPage <= 1}
-                    onClick={() => setProjectPage((p) => Math.max(1, p - 1))}
-                  >
+                  <button className={BTN_SECONDARY} type="button" disabled={projectPage <= 1} onClick={() => setProjectPage((p) => Math.max(1, p - 1))}>
                     ◀ Trước
                   </button>
-                  <button
-                    className={BTN_SECONDARY}
-                    type="button"
-                    disabled={projectPage >= projectTotalPages}
-                    onClick={() => setProjectPage((p) => Math.min(projectTotalPages, p + 1))}
-                  >
+                  <button className={BTN_SECONDARY} type="button" disabled={projectPage >= projectTotalPages} onClick={() => setProjectPage((p) => Math.min(projectTotalPages, p + 1))}>
                     Sau ▶
                   </button>
                 </div>
@@ -545,15 +589,10 @@ export default function AdminRoundManager() {
           )}
         </div>
 
-        {/* Create options */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="space-y-2">
             <label className="flex items-center gap-2 text-sm">
-              <input
-                type="checkbox"
-                checked={autoNumber}
-                onChange={(e) => setAutoNumber(e.target.checked)}
-              />
+              <input type="checkbox" checked={autoNumber} onChange={(e) => setAutoNumber(e.target.checked)} />
               <span>Tự động số vòng</span>
             </label>
 
@@ -575,25 +614,14 @@ export default function AdminRoundManager() {
             </div>
           </div>
 
-          {/* open_at + close_at cùng 1 hàng */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <div>
               <label className="text-sm text-gray-600">Ngày mở</label>
-              <input
-                className={INPUT}
-                type="datetime-local"
-                value={createOpenAt}
-                onChange={(e) => setCreateOpenAt(e.target.value)}
-              />
+              <input className={INPUT} type="datetime-local" value={createOpenAt} onChange={(e) => setCreateOpenAt(e.target.value)} />
             </div>
             <div>
               <label className="text-sm text-gray-600">Ngày đóng</label>
-              <input
-                className={INPUT}
-                type="datetime-local"
-                value={createCloseAt}
-                onChange={(e) => setCreateCloseAt(e.target.value)}
-              />
+              <input className={INPUT} type="datetime-local" value={createCloseAt} onChange={(e) => setCreateCloseAt(e.target.value)} />
             </div>
           </div>
         </div>
@@ -626,11 +654,7 @@ export default function AdminRoundManager() {
         <div className="grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
           <div>
             <label className="text-sm text-gray-600">Project</label>
-            <select
-              className={INPUT}
-              value={filterProjectId}
-              onChange={(e) => setFilterProjectId(e.target.value)}
-            >
+            <select className={INPUT} value={filterProjectId} onChange={(e) => setFilterProjectId(e.target.value)}>
               <option value="">— Tất cả Project —</option>
               {projects.map((p) => (
                 <option key={p.id} value={p.id}>
@@ -642,11 +666,7 @@ export default function AdminRoundManager() {
 
           <div>
             <label className="text-sm text-gray-600">Trạng thái</label>
-            <select
-              className={INPUT}
-              value={filterStatus}
-              onChange={(e) => setFilterStatus(e.target.value)}
-            >
+            <select className={INPUT} value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}>
               <option value="">— Tất cả —</option>
               {ROUND_STATUS_OPTIONS.map((o) => (
                 <option key={o.value} value={o.value}>
@@ -658,22 +678,12 @@ export default function AdminRoundManager() {
 
           <div>
             <label className="text-sm text-gray-600">Ngày tạo từ</label>
-            <input
-              className={INPUT}
-              type="date"
-              value={roundDateFrom}
-              onChange={(e) => setRoundDateFrom(e.target.value)}
-            />
+            <input className={INPUT} type="date" value={roundDateFrom} onChange={(e) => setRoundDateFrom(e.target.value)} />
           </div>
 
           <div>
             <label className="text-sm text-gray-600">Ngày tạo đến</label>
-            <input
-              className={INPUT}
-              type="date"
-              value={roundDateTo}
-              onChange={(e) => setRoundDateTo(e.target.value)}
-            />
+            <input className={INPUT} type="date" value={roundDateTo} onChange={(e) => setRoundDateTo(e.target.value)} />
           </div>
 
           <div className="md:col-span-4 flex gap-2">
@@ -693,26 +703,16 @@ export default function AdminRoundManager() {
         </div>
       </section>
 
-      {/* ===== ROUND LIST ===== */}
+      {/* ===== ROUND LIST (ROW CARDS) ===== */}
       <section className="bg-white border rounded-2xl p-5 space-y-3 shadow-sm">
         <div className="flex items-center justify-between flex-wrap gap-3">
           <h3 className="font-semibold text-lg">📋 Danh sách Round</h3>
 
           <div className="flex items-center gap-2">
-            <button
-              className={BTN_SECONDARY}
-              disabled={roundPage <= 1 || loadingRounds}
-              onClick={() => loadRounds(roundPage - 1)}
-              type="button"
-            >
+            <button className={BTN_SECONDARY} disabled={roundPage <= 1 || loadingRounds} onClick={() => loadRounds(roundPage - 1)} type="button">
               ◀ Trang trước
             </button>
-            <button
-              className={BTN_SECONDARY}
-              disabled={roundPage >= roundTotalPages || loadingRounds}
-              onClick={() => loadRounds(roundPage + 1)}
-              type="button"
-            >
+            <button className={BTN_SECONDARY} disabled={roundPage >= roundTotalPages || loadingRounds} onClick={() => loadRounds(roundPage + 1)} type="button">
               Trang sau ▶
             </button>
           </div>
@@ -721,189 +721,87 @@ export default function AdminRoundManager() {
         {loadingRounds ? (
           <div>Đang tải...</div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="min-w-full border text-sm bg-white">
-              <thead>
-                <tr className="bg-gray-100">
-                  <th className="p-2 border text-left">Project</th>
-                  <th className="p-2 border text-left">Số vòng</th>
-                  <th className="p-2 border text-left">Trạng thái</th>
-                  <th className="p-2 border text-left">Ngày mở</th>
-                  <th className="p-2 border text-left">Ngày đóng</th>
-                  <th className="p-2 border text-left">Mô tả</th>
-                  <th className="p-2 border text-left">Ngày tạo</th>
-                  <th className="p-2 border text-left">Thao tác</th>
-                </tr>
-              </thead>
+          <div className="space-y-2">
+            {rounds.map((r) => {
+              const d =
+                drafts[r.id] ?? {
+                  round_number: r.round_number,
+                  status: r.status,
+                  description: r.description ?? '',
+                  open_at: formatLocalDT(r.open_at),
+                  close_at: formatLocalDT(r.close_at),
+                };
 
-              <tbody>
-                {rounds.map((r) => {
-                  const d =
-                    drafts[r.id] ?? {
-                      round_number: r.round_number,
-                      status: r.status,
-                      description: r.description ?? '',
-                      open_at: formatLocalDT(r.open_at),
-                      close_at: formatLocalDT(r.close_at),
-                    };
+              const dirty =
+                Number(d.round_number) !== r.round_number ||
+                d.status !== r.status ||
+                (d.description ?? '') !== (r.description ?? '') ||
+                (d.open_at ?? '') !== formatLocalDT(r.open_at) ||
+                (d.close_at ?? '') !== formatLocalDT(r.close_at);
 
-                  const dirty =
-                    Number(d.round_number) !== r.round_number ||
-                    d.status !== r.status ||
-                    (d.description ?? '') !== (r.description ?? '') ||
-                    (d.open_at ?? '') !== formatLocalDT(r.open_at) ||
-                    (d.close_at ?? '') !== formatLocalDT(r.close_at);
+              const projectTitle = projectTitleById.get(r.project_id) ?? '(Không rõ project)';
 
-                  return (
-                    <tr key={r.id} className="border-t align-top">
-                      {/* Project: chỉ tên, không show id */}
-                      <td className="p-2 border min-w-[240px]">
-                        <div className="font-medium">
-                          {projectTitleById.get(r.project_id) ?? '(Không rõ project)'}
-                        </div>
-                      </td>
+              return (
+                <div
+                  key={r.id}
+                  className="border rounded-lg px-3 py-2 bg-white hover:bg-gray-50 transition flex items-center gap-3"
+                >
+                  {/* LEFT: minimal info */}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <div className="font-semibold truncate">{projectTitle}</div>
 
-                      <td className="p-2 border min-w-[110px]">
-                        <input
-                          className={INPUT}
-                          type="number"
-                          min={1}
-                          value={d.round_number}
-                          onChange={(e) =>
-                            setDrafts((prev) => ({
-                              ...prev,
-                              [r.id]: { ...d, round_number: Math.max(1, Number(e.target.value || 1)) },
-                            }))
-                          }
-                        />
-                      </td>
+                      <span className="text-gray-400">•</span>
 
-                      <td className="p-2 border min-w-[200px]">
-                        <div className="mb-2">
-                          <span
-                            className={`inline-flex px-2 py-0.5 rounded text-xs font-semibold ${statusPillClass(
-                              r.status
-                            )}`}
-                          >
-                            {viRoundStatus(r.status)}
-                          </span>
-                        </div>
+                      <div className="text-sm text-gray-800 whitespace-nowrap">
+                        Vòng <b>{r.round_number}</b>
+                      </div>
 
-                        <select
-                          className={INPUT}
-                          value={d.status}
-                          onChange={(e) =>
-                            setDrafts((prev) => ({
-                              ...prev,
-                              [r.id]: { ...d, status: e.target.value },
-                            }))
-                          }
-                        >
-                          {ROUND_STATUS_OPTIONS.map((o) => (
-                            <option key={o.value} value={o.value}>
-                              {o.label}
-                            </option>
-                          ))}
-                        </select>
+                      <span
+                        className={`inline-flex px-2 py-0.5 rounded text-xs font-semibold ${statusPillClass(r.status)} whitespace-nowrap`}
+                        title={viRoundStatus(r.status)}
+                      >
+                        {viRoundStatus(r.status)}
+                      </span>
 
-                        {dirty && <div className="text-xs text-amber-700 mt-1">* Có thay đổi chưa lưu</div>}
-                      </td>
+                      {dirty && (
+                        <span className="text-xs text-amber-700 whitespace-nowrap">* Chưa lưu</span>
+                      )}
+                    </div>
 
-                      <td className="p-2 border min-w-[210px]">
-                        <input
-                          className={INPUT}
-                          type="datetime-local"
-                          value={d.open_at}
-                          onChange={(e) =>
-                            setDrafts((prev) => ({
-                              ...prev,
-                              [r.id]: { ...d, open_at: e.target.value },
-                            }))
-                          }
-                        />
-                      </td>
+                    <div className="mt-1 text-xs text-gray-600 truncate">
+                      Mở: {fmtMaybeDT(r.open_at)} &nbsp;|&nbsp; Đóng: {fmtMaybeDT(r.close_at)} &nbsp;|&nbsp; Tạo: {fmtMaybeDT(r.created_at)}
+                    </div>
+                  </div>
 
-                      <td className="p-2 border min-w-[210px]">
-                        <input
-                          className={INPUT}
-                          type="datetime-local"
-                          value={d.close_at}
-                          onChange={(e) =>
-                            setDrafts((prev) => ({
-                              ...prev,
-                              [r.id]: { ...d, close_at: e.target.value },
-                            }))
-                          }
-                        />
-                      </td>
+                  {/* RIGHT: actions */}
+                  <div className="shrink-0 flex items-center gap-2">
+                    <button type="button" className={BTN_SECONDARY} onClick={() => openEditModal(r.id)}>
+                      ✏️ Sửa
+                    </button>
+                    <button type="button" className={BTN_DANGER} onClick={() => deleteRound(r.id)}>
+                      🗑️ Xóa
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
 
-                      <td className="p-2 border min-w-[320px]">
-                        <textarea
-                          className={INPUT}
-                          rows={2}
-                          value={d.description}
-                          onChange={(e) =>
-                            setDrafts((prev) => ({
-                              ...prev,
-                              [r.id]: { ...d, description: e.target.value },
-                            }))
-                          }
-                        />
-                      </td>
+            {rounds.length === 0 && (
+              <div className="p-4 text-center text-gray-500 border rounded-xl bg-gray-50">
+                Không có round phù hợp bộ lọc.
+              </div>
+            )}
 
-                      <td className="p-2 border whitespace-nowrap text-gray-700">
-                        {new Date(r.created_at).toLocaleString()}
-                      </td>
-
-                      <td className="p-2 border whitespace-nowrap">
-                        <div className="flex items-center gap-2">
-                          <button
-                            className={BTN_PRIMARY}
-                            disabled={!dirty || savingId === r.id}
-                            onClick={() => updateRound(r.id)}
-                            type="button"
-                          >
-                            {savingId === r.id ? 'Đang cập nhật…' : 'Cập nhật'}
-                          </button>
-
-                          <button className={BTN_DANGER} onClick={() => deleteRound(r.id)} type="button">
-                            🗑️ Xóa
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-
-                {rounds.length === 0 && (
-                  <tr>
-                    <td colSpan={8} className="p-4 text-center text-gray-500">
-                      Không có round phù hợp bộ lọc.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-
-            <div className="mt-3 flex items-center justify-between text-sm text-gray-700">
+            <div className="mt-2 flex items-center justify-between text-sm text-gray-700">
               <div>
                 Tổng: <b>{roundTotal}</b> | Trang <b>{roundPage}</b>/{roundTotalPages}
               </div>
               <div className="flex items-center gap-2">
-                <button
-                  className={BTN_SECONDARY}
-                  disabled={roundPage <= 1}
-                  onClick={() => loadRounds(roundPage - 1)}
-                  type="button"
-                >
+                <button className={BTN_SECONDARY} disabled={roundPage <= 1} onClick={() => loadRounds(roundPage - 1)} type="button">
                   ◀ Trang trước
                 </button>
-                <button
-                  className={BTN_SECONDARY}
-                  disabled={roundPage >= roundTotalPages}
-                  onClick={() => loadRounds(roundPage + 1)}
-                  type="button"
-                >
+                <button className={BTN_SECONDARY} disabled={roundPage >= roundTotalPages} onClick={() => loadRounds(roundPage + 1)} type="button">
                   Trang sau ▶
                 </button>
               </div>
@@ -911,6 +809,119 @@ export default function AdminRoundManager() {
           </div>
         )}
       </section>
+
+      {/* ===== EDIT MODAL ===== */}
+      {editingId && editForm && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center"
+          role="dialog"
+          aria-modal="true"
+          onMouseDown={(e) => {
+            // click outside to close
+            if (e.target === e.currentTarget) closeEditModal();
+          }}
+        >
+          <div className="absolute inset-0 bg-black/40" />
+
+          <div className="relative w-full max-w-2xl mx-4 bg-white rounded-2xl shadow-xl border">
+            <div className="p-4 border-b flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="text-sm text-gray-500">Chỉnh sửa Round</div>
+                <div className="font-semibold truncate">
+                  {editingRound
+                    ? `${projectTitleById.get(editingRound.project_id) ?? '(Không rõ project)'} • Vòng ${editingRound.round_number}`
+                    : '—'}
+                </div>
+              </div>
+
+              <button type="button" className={BTN_SECONDARY} onClick={closeEditModal}>
+                ✕ Đóng
+              </button>
+            </div>
+
+            <div className="p-4 space-y-3">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div>
+                  <label className="text-sm text-gray-600">Số vòng</label>
+                  <input
+                    className={INPUT}
+                    type="number"
+                    min={1}
+                    value={editForm.round_number}
+                    onChange={(e) =>
+                      setEditForm((prev) =>
+                        prev
+                          ? { ...prev, round_number: Math.max(1, Number(e.target.value || 1)) }
+                          : prev
+                      )
+                    }
+                  />
+                </div>
+
+                <div>
+                  <label className="text-sm text-gray-600">Trạng thái</label>
+                  <select
+                    className={INPUT}
+                    value={editForm.status}
+                    onChange={(e) => setEditForm((prev) => (prev ? { ...prev, status: e.target.value } : prev))}
+                  >
+                    {ROUND_STATUS_OPTIONS.map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div>
+                  <label className="text-sm text-gray-600">Ngày mở</label>
+                  <input
+                    className={INPUT}
+                    type="datetime-local"
+                    value={editForm.open_at}
+                    onChange={(e) => setEditForm((prev) => (prev ? { ...prev, open_at: e.target.value } : prev))}
+                  />
+                </div>
+                <div>
+                  <label className="text-sm text-gray-600">Ngày đóng</label>
+                  <input
+                    className={INPUT}
+                    type="datetime-local"
+                    value={editForm.close_at}
+                    onChange={(e) => setEditForm((prev) => (prev ? { ...prev, close_at: e.target.value } : prev))}
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="text-sm text-gray-600">Mô tả</label>
+                <textarea
+                  className={INPUT}
+                  rows={4}
+                  value={editForm.description}
+                  onChange={(e) => setEditForm((prev) => (prev ? { ...prev, description: e.target.value } : prev))}
+                />
+              </div>
+            </div>
+
+            <div className="p-4 border-t flex items-center justify-end gap-2">
+              <button type="button" className={BTN_SECONDARY} onClick={closeEditModal}>
+                Hủy
+              </button>
+              <button
+                type="button"
+                className={BTN_PRIMARY}
+                onClick={saveEditModal}
+                disabled={savingId === editingId}
+              >
+                {savingId === editingId ? 'Đang cập nhật…' : 'Cập nhật'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
