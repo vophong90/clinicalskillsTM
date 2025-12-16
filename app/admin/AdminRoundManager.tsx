@@ -482,7 +482,7 @@ export default function AdminRoundManager() {
               onClick={() => toggleSelectAllVisibleProjects(projectPageItems)}
               disabled={projectPageItems.length === 0}
             >
-              Chọn/Bỏ chọn (trang project này)
+              Chọn tất cả
             </button>
             <button
               type="button"
@@ -490,7 +490,7 @@ export default function AdminRoundManager() {
               onClick={clearSelectedProjects}
               disabled={selectedProjectIds.size === 0}
             >
-              Xóa chọn
+              Bỏ chọn tất cả
             </button>
           </div>
         </div>
@@ -554,7 +554,7 @@ export default function AdminRoundManager() {
                 checked={autoNumber}
                 onChange={(e) => setAutoNumber(e.target.checked)}
               />
-              <span>Tự động số vòng (max + 1 theo từng project)</span>
+              <span>Tự động số vòng</span>
             </label>
 
             {!autoNumber && (
@@ -578,7 +578,7 @@ export default function AdminRoundManager() {
           {/* open_at + close_at cùng 1 hàng */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <div>
-              <label className="text-sm text-gray-600">Ngày mở (open_at) (tuỳ chọn)</label>
+              <label className="text-sm text-gray-600">Ngày mở</label>
               <input
                 className={INPUT}
                 type="datetime-local"
@@ -587,7 +587,7 @@ export default function AdminRoundManager() {
               />
             </div>
             <div>
-              <label className="text-sm text-gray-600">Ngày đóng (close_at) (tuỳ chọn)</label>
+              <label className="text-sm text-gray-600">Ngày đóng</label>
               <input
                 className={INPUT}
                 type="datetime-local"
@@ -599,7 +599,7 @@ export default function AdminRoundManager() {
         </div>
 
         <div>
-          <label className="text-sm text-gray-600">Mô tả (description)</label>
+          <label className="text-sm text-gray-600">Mô tả</label>
           <textarea
             className={INPUT}
             rows={3}
