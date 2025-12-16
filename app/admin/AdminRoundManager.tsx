@@ -25,9 +25,6 @@ const BTN_SECONDARY =
 const BTN_DANGER =
   'inline-flex items-center px-3 py-2 rounded-lg font-semibold bg-red-600 text-white hover:bg-red-700 disabled:opacity-50';
 
-const COMPACT_INPUT =
-  'w-full border rounded-md px-2 py-1 text-sm outline-none focus:border-blue-300 focus:ring-2 focus:ring-blue-200';
-
 const ROUND_PAGE_SIZE = 10;
 const PROJECT_PICKER_PAGE_SIZE = 10;
 
@@ -109,7 +106,8 @@ export default function AdminRoundManager() {
   );
 
   // ===== FILTERS (ROUND LIST) =====
-  const [filterProjectId, setFilterProjectId] = useState<string>('');
+  const [filterProjectId, setFilterProjectId] = useState<string>(''); // actual filter id
+  const [filterProjectKeyword, setFilterProjectKeyword] = useState<string>(''); // search text
   const [filterStatus, setFilterStatus] = useState<string>('');
   const [roundDateFrom, setRoundDateFrom] = useState<string>(''); // created_at from
   const [roundDateTo, setRoundDateTo] = useState<string>(''); // created_at to
@@ -172,6 +170,13 @@ export default function AdminRoundManager() {
     projects.forEach((p) => m.set(p.id, p.title));
     return m;
   }, [projects]);
+
+  // ===== filtered options for round filter search =====
+  const filteredProjectOptions = useMemo(() => {
+    const kw = filterProjectKeyword.trim().toLowerCase();
+    if (!kw) return [];
+    return projects.filter((p) => p.title.toLowerCase().includes(kw));
+  }, [projects, filterProjectKeyword]);
 
   // ===== LOAD =====
   useEffect(() => {
@@ -310,7 +315,8 @@ export default function AdminRoundManager() {
 
   function toggleSelectAllVisibleProjects(visible: Project[]) {
     setSelectedProjectIds((prev) => {
-      const allVisibleSelected = visible.length > 0 && visible.every((p) => prev.has(p.id));
+      const allVisibleSelected =
+        visible.length > 0 && visible.every((p) => prev.has(p.id));
       const next = new Set(prev);
 
       if (allVisibleSelected) {
@@ -472,27 +478,16 @@ export default function AdminRoundManager() {
   async function saveEditModal() {
     if (!editingId || !editForm) return;
 
-    // sync drafts -> giữ logic cũ (dirty check dùng drafts)
-    setDrafts((prev) => ({
-      ...prev,
-      [editingId]: {
-        round_number: Math.max(1, Number(editForm.round_number || 1)),
-        status: editForm.status,
-        description: editForm.description ?? '',
-        open_at: editForm.open_at ?? '',
-        close_at: editForm.close_at ?? '',
-      },
-    }));
-
-    // gọi update ngay
-    await updateRound(editingId, {
+    const nextDraft = {
       round_number: Math.max(1, Number(editForm.round_number || 1)),
       status: editForm.status,
       description: editForm.description ?? '',
       open_at: editForm.open_at ?? '',
       close_at: editForm.close_at ?? '',
-    });
+    };
 
+    setDrafts((prev) => ({ ...prev, [editingId]: nextDraft }));
+    await updateRound(editingId, nextDraft);
     closeEditModal();
   }
 
@@ -525,15 +520,26 @@ export default function AdminRoundManager() {
 
           <div>
             <label className="text-sm text-gray-600">Ngày tạo project từ</label>
-            <input className={INPUT} type="date" value={projectCreatedFrom} onChange={(e) => setProjectCreatedFrom(e.target.value)} />
+            <input
+              className={INPUT}
+              type="date"
+              value={projectCreatedFrom}
+              onChange={(e) => setProjectCreatedFrom(e.target.value)}
+            />
           </div>
 
           <div>
             <label className="text-sm text-gray-600">Ngày tạo project đến</label>
-            <input className={INPUT} type="date" value={projectCreatedTo} onChange={(e) => setProjectCreatedTo(e.target.value)} />
+            <input
+              className={INPUT}
+              type="date"
+              value={projectCreatedTo}
+              onChange={(e) => setProjectCreatedTo(e.target.value)}
+            />
           </div>
         </div>
 
+        {/* Selected count + actions */}
         <div className="flex items-center justify-between flex-wrap gap-2">
           <div className="text-sm text-gray-700">
             Đã chọn: <b>{selectedProjectIds.size}</b> project
@@ -547,12 +553,18 @@ export default function AdminRoundManager() {
             >
               Chọn tất cả
             </button>
-            <button type="button" className={BTN_SECONDARY} onClick={clearSelectedProjects} disabled={selectedProjectIds.size === 0}>
+            <button
+              type="button"
+              className={BTN_SECONDARY}
+              onClick={clearSelectedProjects}
+              disabled={selectedProjectIds.size === 0}
+            >
               Bỏ chọn tất cả
             </button>
           </div>
         </div>
 
+        {/* Project checklist (10 items/page) */}
         <div className="border rounded-xl p-3 bg-gray-50">
           {loadingProjects ? (
             <div className="text-sm text-gray-500">Đang tải project…</div>
@@ -577,10 +589,20 @@ export default function AdminRoundManager() {
                   Tổng: <b>{filteredProjects.length}</b> | Trang <b>{projectPage}</b>/{projectTotalPages}
                 </div>
                 <div className="flex items-center gap-2">
-                  <button className={BTN_SECONDARY} type="button" disabled={projectPage <= 1} onClick={() => setProjectPage((p) => Math.max(1, p - 1))}>
+                  <button
+                    className={BTN_SECONDARY}
+                    type="button"
+                    disabled={projectPage <= 1}
+                    onClick={() => setProjectPage((p) => Math.max(1, p - 1))}
+                  >
                     ◀ Trước
                   </button>
-                  <button className={BTN_SECONDARY} type="button" disabled={projectPage >= projectTotalPages} onClick={() => setProjectPage((p) => Math.min(projectTotalPages, p + 1))}>
+                  <button
+                    className={BTN_SECONDARY}
+                    type="button"
+                    disabled={projectPage >= projectTotalPages}
+                    onClick={() => setProjectPage((p) => Math.min(projectTotalPages, p + 1))}
+                  >
                     Sau ▶
                   </button>
                 </div>
@@ -589,6 +611,7 @@ export default function AdminRoundManager() {
           )}
         </div>
 
+        {/* Create options */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="space-y-2">
             <label className="flex items-center gap-2 text-sm">
@@ -614,14 +637,25 @@ export default function AdminRoundManager() {
             </div>
           </div>
 
+          {/* open_at + close_at cùng 1 hàng */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <div>
               <label className="text-sm text-gray-600">Ngày mở</label>
-              <input className={INPUT} type="datetime-local" value={createOpenAt} onChange={(e) => setCreateOpenAt(e.target.value)} />
+              <input
+                className={INPUT}
+                type="datetime-local"
+                value={createOpenAt}
+                onChange={(e) => setCreateOpenAt(e.target.value)}
+              />
             </div>
             <div>
               <label className="text-sm text-gray-600">Ngày đóng</label>
-              <input className={INPUT} type="datetime-local" value={createCloseAt} onChange={(e) => setCreateCloseAt(e.target.value)} />
+              <input
+                className={INPUT}
+                type="datetime-local"
+                value={createCloseAt}
+                onChange={(e) => setCreateCloseAt(e.target.value)}
+              />
             </div>
           </div>
         </div>
@@ -652,16 +686,57 @@ export default function AdminRoundManager() {
         <h3 className="font-semibold text-lg">🔎 Bộ lọc danh sách Round</h3>
 
         <div className="grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
-          <div>
+          {/* Project search like "Tìm project theo tên" */}
+          <div className="relative md:col-span-1">
             <label className="text-sm text-gray-600">Project</label>
-            <select className={INPUT} value={filterProjectId} onChange={(e) => setFilterProjectId(e.target.value)}>
-              <option value="">— Tất cả Project —</option>
-              {projects.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.title}
-                </option>
-              ))}
-            </select>
+
+            <input
+              className={INPUT}
+              placeholder="Gõ tên project để lọc…"
+              value={filterProjectKeyword}
+              onChange={(e) => {
+                setFilterProjectKeyword(e.target.value);
+                setFilterProjectId(''); // reset id while typing
+              }}
+            />
+
+            {/* suggestion dropdown */}
+            {filteredProjectOptions.length > 0 && (
+              <div className="absolute z-10 mt-1 w-full max-h-60 overflow-auto border rounded-lg bg-white shadow">
+                {filteredProjectOptions.map((p) => (
+                  <button
+                    key={p.id}
+                    type="button"
+                    className="w-full text-left px-3 py-2 text-sm hover:bg-blue-50"
+                    onClick={() => {
+                      setFilterProjectId(p.id);
+                      setFilterProjectKeyword(p.title); // lock text
+                    }}
+                  >
+                    {p.title}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {/* selected hint */}
+            {filterProjectId && (
+              <div className="mt-1 text-xs text-gray-600 flex items-center gap-2">
+                <span>
+                  Đang lọc theo: <b>{projectTitleById.get(filterProjectId)}</b>
+                </span>
+                <button
+                  type="button"
+                  className="text-red-600 hover:underline"
+                  onClick={() => {
+                    setFilterProjectId('');
+                    setFilterProjectKeyword('');
+                  }}
+                >
+                  ✕ Bỏ lọc
+                </button>
+              </div>
+            )}
           </div>
 
           <div>
@@ -692,6 +767,7 @@ export default function AdminRoundManager() {
               type="button"
               onClick={() => {
                 setFilterProjectId('');
+                setFilterProjectKeyword('');
                 setFilterStatus('');
                 setRoundDateFrom('');
                 setRoundDateTo('');
@@ -746,7 +822,6 @@ export default function AdminRoundManager() {
                   key={r.id}
                   className="border rounded-lg px-3 py-2 bg-white hover:bg-gray-50 transition flex items-center gap-3"
                 >
-                  {/* LEFT: minimal info */}
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 min-w-0">
                       <div className="font-semibold truncate">{projectTitle}</div>
@@ -764,9 +839,7 @@ export default function AdminRoundManager() {
                         {viRoundStatus(r.status)}
                       </span>
 
-                      {dirty && (
-                        <span className="text-xs text-amber-700 whitespace-nowrap">* Chưa lưu</span>
-                      )}
+                      {dirty && <span className="text-xs text-amber-700 whitespace-nowrap">* Chưa lưu</span>}
                     </div>
 
                     <div className="mt-1 text-xs text-gray-600 truncate">
@@ -774,7 +847,6 @@ export default function AdminRoundManager() {
                     </div>
                   </div>
 
-                  {/* RIGHT: actions */}
                   <div className="shrink-0 flex items-center gap-2">
                     <button type="button" className={BTN_SECONDARY} onClick={() => openEditModal(r.id)}>
                       ✏️ Sửa
@@ -817,7 +889,6 @@ export default function AdminRoundManager() {
           role="dialog"
           aria-modal="true"
           onMouseDown={(e) => {
-            // click outside to close
             if (e.target === e.currentTarget) closeEditModal();
           }}
         >
@@ -850,9 +921,7 @@ export default function AdminRoundManager() {
                     value={editForm.round_number}
                     onChange={(e) =>
                       setEditForm((prev) =>
-                        prev
-                          ? { ...prev, round_number: Math.max(1, Number(e.target.value || 1)) }
-                          : prev
+                        prev ? { ...prev, round_number: Math.max(1, Number(e.target.value || 1)) } : prev
                       )
                     }
                   />
@@ -910,12 +979,7 @@ export default function AdminRoundManager() {
               <button type="button" className={BTN_SECONDARY} onClick={closeEditModal}>
                 Hủy
               </button>
-              <button
-                type="button"
-                className={BTN_PRIMARY}
-                onClick={saveEditModal}
-                disabled={savingId === editingId}
-              >
+              <button type="button" className={BTN_PRIMARY} onClick={saveEditModal} disabled={savingId === editingId}>
                 {savingId === editingId ? 'Đang cập nhật…' : 'Cập nhật'}
               </button>
             </div>
