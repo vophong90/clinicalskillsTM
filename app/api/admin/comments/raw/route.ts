@@ -1,4 +1,3 @@
-// app/api/admin/comments/raw/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { getAdminClient } from '@/lib/supabase-admin';
 
@@ -93,6 +92,11 @@ export async function POST(req: NextRequest) {
   const round_id: string | null =
     typeof body.round_id === 'string' ? body.round_id : null;
 
+  // cohort_code là tuỳ chọn: nếu null -> lấy tất cả đối tượng
+  const cohort_code_raw =
+    typeof body.cohort_code === 'string' ? body.cohort_code.trim() : '';
+  const cohort_code: string | null = cohort_code_raw || null;
+
   if (!round_id) {
     return NextResponse.json(
       { error: 'round_id là bắt buộc' },
@@ -148,7 +152,7 @@ export async function POST(req: NextRequest) {
       itemMap.set(it.id, it as DBItem);
     });
 
-    // 4. Lấy responses (chỉ bản đã nộp) với PHÂN TRANG để tránh limit 1000
+    // 4. Lấy responses (chỉ bản đã nộp) với PHÂN TRANG
     const PAGE = 1000;
     let from = 0;
     const allResponses: DBResponse[] = [];
@@ -181,9 +185,43 @@ export async function POST(req: NextRequest) {
       from += PAGE;
     }
 
+    // 5. Nếu có filter cohort_code -> xác định user_id nào thuộc cohort đó
+    let allowedUserIds: Set<string> | null = null;
+
+    if (cohort_code) {
+      const userIds = Array.from(
+        new Set(allResponses.map((r) => r.user_id).filter(Boolean))
+      ) as string[];
+
+      if (userIds.length > 0) {
+        const { data: profilesData, error: profilesErr } = await s
+          .from('profiles')
+          .select('id, cohort_code')
+          .in('id', userIds);
+
+        if (profilesErr) {
+          throw new Error('Lỗi truy vấn profiles: ' + profilesErr.message);
+        }
+
+        allowedUserIds = new Set(
+          (profilesData || [])
+            .filter((p: any) => p.cohort_code === cohort_code)
+            .map((p: any) => p.id as string)
+        );
+      } else {
+        allowedUserIds = new Set();
+      }
+    }
+
+    // 6. Extract comment
     const comments: CommentRow[] = [];
 
     allResponses.forEach((r) => {
+      // Nếu có filter đối tượng mà user không thuộc cohort -> bỏ
+      if (cohort_code && allowedUserIds && !allowedUserIds.has(r.user_id)) {
+        return;
+      }
+
       const c = extractComment(r.answer_json);
       if (!c) return;
 
@@ -210,7 +248,12 @@ export async function POST(req: NextRequest) {
       return (a.user_id || '').localeCompare(b.user_id || '');
     });
 
-    return NextResponse.json({ comments, total_responses: allResponses.length });
+    return NextResponse.json({
+      comments,
+      total_responses_filtered: comments.length,
+      total_responses_all: allResponses.length,
+      cohort_code: cohort_code,
+    });
   } catch (e: any) {
     console.error('Error in /api/admin/comments/raw:', e);
     return NextResponse.json(
