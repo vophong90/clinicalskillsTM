@@ -6,7 +6,7 @@ import { supabase } from '@/lib/supabaseClient';
 
 type Project = { id: string; title: string; status: string };
 type Round = { id: string; project_id: string; round_number: number };
-type Profile = { id: string; email: string; name: string | null; role: string };
+type Profile = { id: string; email: string; name: string | null; role: string; cohort_code: string | null };
 
 type ProgressRow = {
   user_id: string;
@@ -112,6 +112,7 @@ export default function AdminSurveyInviteManager() {
   const [filterStatus, setFilterStatus] = useState('');
   const [filterRole, setFilterRole] = useState<'' | 'core_expert' | 'external_expert'>('');
   const [filterEmailAge, setFilterEmailAge] = useState<'' | 'never' | 'recent_7' | 'older_7'>('');
+  const [filterCohort, setFilterCohort] = useState('');
   const [selectedRoundIds, setSelectedRoundIds] = useState<string[]>([]);
   const [checkedProfiles, setCheckedProfiles] = useState<Record<string, boolean>>({});
   const [q, setQ] = useState('');
@@ -146,7 +147,7 @@ export default function AdminSurveyInviteManager() {
     while (true) {
       const { data, error } = await supabase
         .from('profiles')
-        .select('id,email,name,role')
+        .select('id,email,name,role,cohort_code')
         .order('email')
         .range(from, from + PAGE - 1);
 
@@ -223,10 +224,28 @@ export default function AdminSurveyInviteManager() {
     const k = q.trim().toLowerCase();
     return profiles.filter((p) => {
       if (filterRole && p.role !== filterRole) return false;
+      if (filterCohort) {
+        const cc = (p.cohort_code || '').trim();
+        if (filterCohort === '__NULL__') {
+          if (cc) return false;
+        } else {
+          if (cc !== filterCohort) return false;
+        }
+      }
       const hit = !k || p.email.toLowerCase().includes(k) || (p.name || '').toLowerCase().includes(k);
       return hit;
     });
-  }, [profiles, q, filterRole]);
+  }, [profiles, q, filterRole, filterCohort]);
+
+  // Lọc theo đối tượng
+  const cohortOptions = useMemo(() => {
+    const set = new Set<string>();
+    profiles.forEach((p) => {
+      const v = (p.cohort_code || '').trim();
+      if (v) set.add(v);
+    });
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [profiles]);
 
   // Lọc tiếp theo “độ tuổi” email gửi lần cuối (7 ngày)
   const filteredProfiles = useMemo(() => {
@@ -259,7 +278,7 @@ export default function AdminSurveyInviteManager() {
   // Reset page về 1 khi đổi bộ lọc / từ khoá
   useEffect(() => {
     setPage(1);
-  }, [q, filterRole, filterEmailAge, selectedRoundIds]);
+  }, [q, filterRole, filterEmailAge, filterCohort, selectedRoundIds]);
 
   const totalPages = useMemo(
     () => Math.max(1, Math.ceil(filteredProfiles.length / PAGE_SIZE_PROFILES)),
@@ -522,6 +541,16 @@ export default function AdminSurveyInviteManager() {
             <option value="external_expert">Chuyên gia bên ngoài</option>
           </select>
 
+          <select className={INPUT + ' md:w-56'} value={filterCohort} onChange={(e) => setFilterCohort(e.target.value)}>
+            <option value="">— Tất cả đối tượng —</option>
+            <option value="__NULL__">(Chưa gán đối tượng)</option>
+            {cohortOptions.map((c) => (
+              <option key={c} value={c}>
+              {c}
+              </option>
+              ))}
+          </select>
+
           <select
             className={INPUT + ' md:w-64'}
             value={filterEmailAge}
@@ -607,6 +636,7 @@ export default function AdminSurveyInviteManager() {
                     <b>{u.name || u.email}</b>{' '}
                     <span className="text-slate-500">
                       ({u.email}) – <i>{u.role}</i>
+                      {u.cohort_code ? <> – <b>{u.cohort_code}</b></> : null}
                     </span>
                   </span>
 
