@@ -22,7 +22,8 @@ async function findAuthUserIdByEmail(s: ReturnType<typeof getAdminClient>, email
 async function ensureAuthAndProfile(
   s: ReturnType<typeof getAdminClient>,
   email: string,
-  fullName: string
+  fullName: string,
+  cohort_code?: string | null
 ) {
   // 1) Tìm profile theo email trước (rẻ + nhanh)
   const prof = await s.from('profiles').select('id').eq('email', email).maybeSingle();
@@ -48,14 +49,13 @@ async function ensureAuthAndProfile(
   }
 
   // 4) Tạo/ghép profiles (id khớp auth.users.id)
+  const payload: any = { id: userId, email, name: fullName, role: 'external_expert' };
+  if (cohort_code) payload.cohort_code = cohort_code;
   const { error: upErr } = await s
     .from('profiles')
-    .upsert(
-      { id: userId, email, name: fullName, role: 'external_expert' },
-      { onConflict: 'id' }
-    );
+    .upsert(payload, { onConflict: 'id' });
+  
   if (upErr) throw upErr;
-
   return userId;
 }
 
@@ -78,6 +78,7 @@ export async function POST(req: Request) {
     const org = raw?.org ?? null;
     const title = raw?.title ?? null;
     const phone = raw?.phone ?? null;
+    const cohort_code = raw?.cohort_code ?? null;
 
     if (!full_name || !email) {
       details.push({ email, skipped: true, reason: 'missing full_name/email' });
@@ -86,7 +87,7 @@ export async function POST(req: Request) {
 
     try {
       // Bảo đảm có auth user + profile
-      const userId = await ensureAuthAndProfile(s, email, full_name);
+      const userId = await ensureAuthAndProfile(s, email, full_name, cohort_code);
 
       // Upsert external_experts (email unique/citext), map user_id
       const { error: extErr } = await s
