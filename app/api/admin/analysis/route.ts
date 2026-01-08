@@ -171,6 +171,7 @@ export async function POST(req: NextRequest) {
         .from('items')
         .select('id, round_id, project_id, prompt, options_json, item_order')
         .in('round_id', round_ids)
+        .order('id', { ascending: true }) 
         .range(fromItems, fromItems + PAGE_ITEMS - 1);
 
       if (error) {
@@ -196,6 +197,9 @@ export async function POST(req: NextRequest) {
         .select('round_id, item_id, user_id, answer_json, is_submitted')
         .in('round_id', round_ids)
         .eq('is_submitted', true)
+        .order('round_id', { ascending: true })
+        .order('item_id', { ascending: true })
+        .order('user_id', { ascending: true })
         .range(fromResp, fromResp + PAGE_RESP - 1);
 
       if (error) {
