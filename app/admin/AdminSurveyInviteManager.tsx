@@ -322,7 +322,8 @@ export default function AdminSurveyInviteManager() {
           const org = (r['org'] ?? '').trim();
           const title = (r['title'] ?? '').trim();
           const phone = (r['phone'] ?? '').trim();
-          return { full_name, email, org: org || null, title: title || null, phone: phone || null };
+          const cohort_code = String(r['cohort_code'] ?? '').trim();
+          return { full_name, email, org: org || null, title: title || null, phone: phone || null, cohort_code: cohort_code || null};
         })
         .filter((r) => r.full_name && r.email);
 
@@ -467,7 +468,7 @@ export default function AdminSurveyInviteManager() {
           }}
         />
         <div className="text-xs text-slate-600">
-          CSV header tối thiểu: <code>full_name,email</code> (có thể kèm <code>org,title,phone</code>).
+          CSV header tối thiểu: <code>full_name,email</code> (có thể kèm <code>org,title,phone,cohort_code</code>).
         </div>
       </div>
 
