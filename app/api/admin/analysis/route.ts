@@ -44,7 +44,7 @@ type AnalysisRow = {
   round_label: string;
   item_id: string;
   full_prompt: string;
-  N: number; // N của item (số người trả lời item này trong vòng đó)
+  N: number; // N của vòng (số người tham gia vòng đó trong cohort đã chọn)
   options: AnalysisOption[];
   nonEssentialPercent: number;
 };
@@ -117,15 +117,21 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // cắt ngưỡng
+  // cắt ngưỡng (meta thôi, FE dùng)
   const cutOffConsensus = typeof body.cut_off === 'number' ? body.cut_off : 70;
   const cutOffNonEssential =
     typeof body.cut_off_nonessential === 'number'
       ? body.cut_off_nonessential
       : 30;
 
+  // lọc theo đối tượng (cohort)
+  const cohortCode: string | null =
+    typeof body.cohort_code === 'string' && body.cohort_code.trim() !== ''
+      ? body.cohort_code.trim()
+      : null;
+
   try {
-    // 1. Lấy rounds (số vòng truyền vào đã giới hạn bởi round_ids, không lo 1000)
+    // 1. Lấy rounds
     const { data: rounds, error: roundsErr } = await s
       .from('rounds')
       .select('id, project_id, round_number')
@@ -146,7 +152,7 @@ export async function POST(req: NextRequest) {
       projectIds.add(r.project_id);
     }
 
-    // 2. Lấy projects (cũng chỉ theo projectIds, không lo 1000)
+    // 2. Lấy projects
     const { data: projects, error: projErr } = await s
       .from('projects')
       .select('id, title')
@@ -161,7 +167,7 @@ export async function POST(req: NextRequest) {
       projectMap.set(p.id, p);
     });
 
-    // 3. Lấy items cho các round đã chọn – có phân trang
+    // 3. Lấy items cho các round đã chọn – có phân trang + order ổn định
     const PAGE_ITEMS = 1000;
     let allItems: DBItem[] = [];
     let fromItems = 0;
@@ -171,7 +177,9 @@ export async function POST(req: NextRequest) {
         .from('items')
         .select('id, round_id, project_id, prompt, options_json, item_order')
         .in('round_id', round_ids)
-        .order('id', { ascending: true }) 
+        .order('round_id', { ascending: true })
+        .order('item_order', { ascending: true, nullsFirst: true })
+        .order('id', { ascending: true })
         .range(fromItems, fromItems + PAGE_ITEMS - 1);
 
       if (error) {
@@ -186,7 +194,7 @@ export async function POST(req: NextRequest) {
       fromItems += PAGE_ITEMS;
     }
 
-    // 4. Lấy responses (chỉ bản đã nộp cuối) – có phân trang
+    // 4. Lấy responses (chỉ bản đã nộp) – có phân trang + order ổn định
     const PAGE_RESP = 1000;
     let allResponses: DBResponse[] = [];
     let fromResp = 0;
@@ -214,7 +222,34 @@ export async function POST(req: NextRequest) {
       fromResp += PAGE_RESP;
     }
 
-    const respList = allResponses;
+    // 4b. Nếu có lọc cohort, giới hạn responses theo cohort_code của profile
+    let respList: DBResponse[] = allResponses;
+
+    if (cohortCode) {
+      const userIds = Array.from(new Set(respList.map((r) => r.user_id)));
+
+      if (userIds.length > 0) {
+        const { data: profiles, error: profErr } = await s
+          .from('profiles')
+          .select('id, cohort_code')
+          .in('id', userIds);
+
+        if (profErr) {
+          throw new Error('Lỗi truy vấn profiles: ' + profErr.message);
+        }
+
+        const cohortMap = new Map<string, string | null>();
+        (profiles || []).forEach((p: any) => {
+          cohortMap.set(p.id, p.cohort_code ?? null);
+        });
+
+        respList = respList.filter(
+          (r) => cohortMap.get(r.user_id) === cohortCode
+        );
+      } else {
+        respList = [];
+      }
+    }
 
     // 5. Group responses theo (round_id, item_id)
     const itemRespMap = new Map<string, DBResponse[]>();
@@ -228,7 +263,18 @@ export async function POST(req: NextRequest) {
       arr.push(r);
     }
 
-    // 6. Tính toán cho từng item (N = số người trả lời item đó trong vòng)
+    // 5b. Group participants theo round (sau khi đã lọc cohort)
+    const roundParticipantMap = new Map<string, Set<string>>();
+    for (const r of respList) {
+      let set = roundParticipantMap.get(r.round_id);
+      if (!set) {
+        set = new Set<string>();
+        roundParticipantMap.set(r.round_id, set);
+      }
+      set.add(r.user_id);
+    }
+
+    // 6. Tính toán cho từng item
     const rows: AnalysisRow[] = [];
 
     for (const item of allItems) {
@@ -246,21 +292,19 @@ export async function POST(req: NextRequest) {
         continue;
       }
 
-      const key = `${item.round_id}:${item.id}`;
-      const respForItem = itemRespMap.get(key) || [];
-
-      // N = số người thực sự trả lời item này (distinct user_id)
-      const participantIds = new Set<string>();
-      for (const r of respForItem) {
-        participantIds.add(r.user_id);
-      }
-      const N = participantIds.size;
-      if (N === 0) {
-        // không ai trả lời item này → bỏ qua
+      // N_round: số người (distinct user_id) thuộc cohort (nếu có lọc)
+      // đã nộp trong vòng này
+      const roundParticipants = roundParticipantMap.get(item.round_id) || new Set<string>();
+      const N_round = roundParticipants.size;
+      if (N_round === 0) {
+        // không ai trong cohort tham gia vòng này → bỏ qua item
         continue;
       }
 
-      // Đếm số người chọn từng option
+      const key = `${item.round_id}:${item.id}`;
+      const respForItem = itemRespMap.get(key) || [];
+
+      // Đếm số người (trong cohort) chọn từng option
       const counts = new Map<string, number>();
       for (const label of optionLabels) {
         counts.set(label, 0);
@@ -276,10 +320,10 @@ export async function POST(req: NextRequest) {
         });
       }
 
-      // Tính % cho từng option, chia cho N của item trong vòng đó
+      // Tính % cho từng option, chia cho N_round (tổng người tham gia vòng)
       const options: AnalysisOption[] = optionLabels.map((label) => {
         const c = counts.get(label) || 0;
-        const percent = N > 0 ? (c / N) * 100 : 0;
+        const percent = N_round > 0 ? (c / N_round) * 100 : 0;
         return { option_label: label, percent };
       });
 
@@ -306,7 +350,7 @@ export async function POST(req: NextRequest) {
         round_label: `Vòng ${round.round_number}`,
         item_id: item.id,
         full_prompt: item.prompt,
-        N,
+        N: N_round,
         options,
         nonEssentialPercent,
       });
@@ -331,6 +375,7 @@ export async function POST(req: NextRequest) {
         cutOffConsensus,
         cutOffNonEssential,
         round_count: round_ids.length,
+        cohort_code: cohortCode,
       },
     });
   } catch (e: any) {
