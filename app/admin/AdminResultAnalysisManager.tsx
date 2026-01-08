@@ -14,6 +14,8 @@ type Round = {
 type Project = {
   id: string;
   title: string;
+  status: string;
+  created_at: string;
   rounds: Round[];
 };
 
@@ -46,15 +48,12 @@ function truncatePrompt(text: string, maxWords = 6): string {
 function buildAnalysisCsv(rows: AnalysisRow[], allOptionLabels: string[]): string {
   const escape = (val: any) => {
     const s = String(val ?? '');
-    // Escape dấu " bên trong
     return `"${s.replace(/"/g, '""')}"`;
   };
 
-  // Header
   const header = ['Project', 'Vòng', 'Câu hỏi', 'N', ...allOptionLabels];
   const lines: string[] = [header.map(escape).join(',')];
 
-  // Data
   for (const row of rows) {
     const baseCols = [
       row.project_title,
@@ -65,7 +64,6 @@ function buildAnalysisCsv(rows: AnalysisRow[], allOptionLabels: string[]): strin
 
     const optionCols = allOptionLabels.map((label) => {
       const opt = row.options.find((o) => o.option_label === label);
-      // giữ dạng số (x.y), không thêm dấu %
       return opt ? opt.percent.toFixed(1) : '';
     });
 
@@ -85,6 +83,14 @@ export default function AdminResultAnalysisManager() {
   const [projectFilter, setProjectFilter] = useState<'all' | string>('all');
   const [roundStatusFilter, setRoundStatusFilter] = useState<'all' | 'active' | 'closed'>('all');
 
+  // lọc theo ngày tạo project
+  const [createdFrom, setCreatedFrom] = useState('');
+  const [createdTo, setCreatedTo] = useState('');
+
+  // lọc theo đối tượng (cohort)
+  const [cohortFilter, setCohortFilter] = useState<'all' | string>('all');
+  const [cohortOptions, setCohortOptions] = useState<string[]>([]);
+
   // set các round_id được chọn để phân tích
   const [selectedRoundIds, setSelectedRoundIds] = useState<Set<string>>(new Set());
 
@@ -99,15 +105,16 @@ export default function AdminResultAnalysisManager() {
   // lưu các câu đang được "mở rộng" câu hỏi đầy đủ
   const [expandedItemIds, setExpandedItemIds] = useState<Set<string>>(new Set());
 
-  // load dự án + vòng cho admin
+  // load dự án + vòng cho admin + list cohort
   useEffect(() => {
-    const loadProjects = async () => {
+    const loadData = async () => {
       setLoading(true);
       setError(null);
 
+      // 1. Projects
       const { data: projectsData, error: projErr } = await supabase
         .from('projects')
-        .select('id, title, status');
+        .select('id, title, status, created_at');
 
       if (projErr) {
         setError('Lỗi truy vấn projects: ' + projErr.message);
@@ -117,6 +124,7 @@ export default function AdminResultAnalysisManager() {
 
       const projectIds = projectsData?.map((p) => p.id) || [];
 
+      // 2. Rounds
       const { data: roundsData, error: roundErr } = await supabase
         .from('rounds')
         .select('id, project_id, round_number, status')
@@ -129,11 +137,17 @@ export default function AdminResultAnalysisManager() {
       }
 
       const projMap: Record<string, Project> = {};
-      (projectsData || []).forEach((p) => {
-        projMap[p.id] = { id: p.id, title: p.title, rounds: [] };
+      (projectsData || []).forEach((p: any) => {
+        projMap[p.id] = {
+          id: p.id,
+          title: p.title,
+          status: p.status,
+          created_at: p.created_at,
+          rounds: [],
+        };
       });
 
-      (roundsData || []).forEach((r) => {
+      (roundsData || []).forEach((r: any) => {
         if (projMap[r.project_id]) {
           projMap[r.project_id].rounds.push({
             id: r.id,
@@ -145,50 +159,83 @@ export default function AdminResultAnalysisManager() {
       });
 
       setProjects(Object.values(projMap));
+
+      // 3. Danh sách cohort (đối tượng)
+      const { data: profileData, error: profileErr } = await supabase
+        .from('profiles')
+        .select('cohort_code')
+        .not('cohort_code', 'is', null);
+
+      if (profileErr) {
+        console.error('Lỗi load cohort_code từ profiles:', profileErr);
+      } else {
+        const distinct = Array.from(
+          new Set((profileData || []).map((p: any) => p.cohort_code as string))
+        ).sort();
+        setCohortOptions(distinct);
+      }
+
       setLoading(false);
     };
 
-    loadProjects();
+    loadData();
   }, []);
 
   // bộ lọc Project: nếu chọn 1 project cụ thể thì giữ lại selection giao với project đó
   const handleProjectFilterChange = (value: string) => {
-  const newFilter: 'all' | string = value === 'all' ? 'all' : value;
-  setProjectFilter(newFilter);
+    const newFilter: 'all' | string = value === 'all' ? 'all' : value;
+    setProjectFilter(newFilter);
 
-  if (newFilter === 'all') {
-    // chế độ xem tất cả – không đụng đến selectedRoundIds
-    return;
-  }
-
-  setSelectedRoundIds((prev) => {
-    const proj = projects.find((p) => p.id === newFilter);
-    if (!proj) return prev;
-
-    const projRoundIds = proj.rounds.map((r) => r.id);
-    const projSet = new Set(projRoundIds);
-
-    // lấy giao giữa selection cũ và các vòng thuộc project này
-    const next = new Set<string>();
-    prev.forEach((id) => {
-      if (projSet.has(id)) next.add(id);
-    });
-
-    // nếu chưa tick vòng nào của project này thì mặc định tick tất cả vòng
-    if (next.size === 0) {
-      projRoundIds.forEach((id) => next.add(id));
+    if (newFilter === 'all') {
+      return;
     }
 
-    return next;
-  });
-};
+    setSelectedRoundIds((prev) => {
+      const proj = projects.find((p) => p.id === newFilter);
+      if (!proj) return prev;
+
+      const projRoundIds = proj.rounds.map((r) => r.id);
+      const projSet = new Set(projRoundIds);
+
+      const next = new Set<string>();
+      prev.forEach((id) => {
+        if (projSet.has(id)) next.add(id);
+      });
+
+      if (next.size === 0) {
+        projRoundIds.forEach((id) => next.add(id));
+      }
+
+      return next;
+    });
+  };
 
   // danh sách project sau khi áp bộ lọc
   const filteredProjects = useMemo(() => {
     let result = projects;
+
     if (projectFilter !== 'all') {
       result = result.filter((p) => p.id === projectFilter);
     }
+
+    // lọc theo ngày tạo
+    if (createdFrom) {
+      const fromDate = new Date(createdFrom);
+      result = result.filter((p) => {
+        const created = new Date(p.created_at);
+        return created >= fromDate;
+      });
+    }
+
+    if (createdTo) {
+      const toDate = new Date(createdTo);
+      toDate.setHours(23, 59, 59, 999);
+      result = result.filter((p) => {
+        const created = new Date(p.created_at);
+        return created <= toDate;
+      });
+    }
+
     if (roundStatusFilter !== 'all') {
       result = result.map((p) => ({
         ...p,
@@ -200,7 +247,7 @@ export default function AdminResultAnalysisManager() {
       }));
     }
     return result;
-  }, [projects, projectFilter, roundStatusFilter]);
+  }, [projects, projectFilter, roundStatusFilter, createdFrom, createdTo]);
 
   // danh sách tất cả round được hiển thị (sau filter)
   const allVisibleRoundIds = useMemo(
@@ -210,6 +257,19 @@ export default function AdminResultAnalysisManager() {
       ),
     [filteredProjects]
   );
+
+  // Khi thay đổi filter làm thay đổi danh sách round hiển thị,
+  // loại bỏ những round_id không còn visible khỏi selection
+  useEffect(() => {
+    setSelectedRoundIds((prev) => {
+      const visibleSet = new Set(allVisibleRoundIds);
+      const next = new Set<string>();
+      prev.forEach((id) => {
+        if (visibleSet.has(id)) next.add(id);
+      });
+      return next;
+    });
+  }, [allVisibleRoundIds]);
 
   const toggleRoundSelection = (roundId: string) => {
     setSelectedRoundIds((prev) => {
@@ -227,10 +287,8 @@ export default function AdminResultAnalysisManager() {
     setSelectedRoundIds((prev) => {
       const next = new Set(prev);
       if (hasAll) {
-        // bỏ chọn tất cả vòng của project
         projectRoundIds.forEach((id) => next.delete(id));
       } else {
-        // chọn tất cả vòng của project
         projectRoundIds.forEach((id) => next.add(id));
       }
       return next;
@@ -269,8 +327,12 @@ export default function AdminResultAnalysisManager() {
   const handleRunAnalysis = async () => {
     setError(null);
 
-    // phân tích TẤT CẢ vòng đang được tick
-    const roundIdsToAnalyze = Array.from(selectedRoundIds);
+    // chỉ phân tích các round đang tick + còn hiển thị
+    const visibleSet = new Set(allVisibleRoundIds);
+    const roundIdsToAnalyze = Array.from(selectedRoundIds).filter((id) =>
+      visibleSet.has(id)
+    );
+
     if (roundIdsToAnalyze.length === 0) {
       setError('Vui lòng chọn ít nhất 1 vòng để phân tích.');
       return;
@@ -287,6 +349,7 @@ export default function AdminResultAnalysisManager() {
           round_ids: roundIdsToAnalyze,
           cut_off: cutOffConsensus,
           cut_off_nonessential: cutOffNonEssential,
+          cohort_code: cohortFilter === 'all' ? null : cohortFilter,
         }),
       });
 
@@ -314,7 +377,7 @@ export default function AdminResultAnalysisManager() {
     }
   };
 
-    const handleExportExcel = () => {
+  const handleExportExcel = () => {
     if (!analysisRows.length) {
       setError('Không có dữ liệu để xuất.');
       return;
@@ -323,7 +386,6 @@ export default function AdminResultAnalysisManager() {
     try {
       const csv = buildAnalysisCsv(analysisRows, allOptionLabels);
 
-      // Thêm BOM để Excel đọc đúng tiếng Việt
       const blob = new Blob(['\uFEFF' + csv], {
         type: 'text/csv;charset=utf-8;',
       });
@@ -347,7 +409,7 @@ export default function AdminResultAnalysisManager() {
   };
 
   return (
-    <div className="space-y-6 max-w-full overflow-x-hidden"> 
+    <div className="space-y-6 max-w-full overflow-x-hidden">
       <h1 className="text-xl font-bold mb-2">📊 Phân tích kết quả</h1>
 
       {/* Bộ lọc */}
@@ -388,7 +450,6 @@ export default function AdminResultAnalysisManager() {
             </select>
           </div>
 
-          {/* Thông tin chọn vòng */}
           <div className="flex flex-col justify-end text-sm text-gray-600">
             <span>
               Đang chọn: <b>{selectedRoundIds.size}</b> vòng
@@ -396,6 +457,51 @@ export default function AdminResultAnalysisManager() {
             <span>
               Tổng vòng hiển thị: <b>{allVisibleRoundIds.length}</b>
             </span>
+          </div>
+        </div>
+
+        {/* Hàng filter thứ 2: ngày tạo & đối tượng */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-3">
+          <div>
+            <label className="block text-sm font-semibold mb-1">
+              Ngày tạo từ
+            </label>
+            <input
+              type="date"
+              className="w-full border rounded px-2 py-1 text-sm"
+              value={createdFrom}
+              onChange={(e) => setCreatedFrom(e.target.value)}
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-semibold mb-1">
+              Ngày tạo đến
+            </label>
+            <input
+              type="date"
+              className="w-full border rounded px-2 py-1 text-sm"
+              value={createdTo}
+              onChange={(e) => setCreatedTo(e.target.value)}
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-semibold mb-1">
+              Đối tượng (cohort)
+            </label>
+            <select
+              className="w-full border rounded px-2 py-1 text-sm"
+              value={cohortFilter}
+              onChange={(e) =>
+                setCohortFilter(e.target.value as 'all' | string)
+              }
+            >
+              <option value="all">Tất cả</option>
+              {cohortOptions.map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
+              ))}
+            </select>
           </div>
         </div>
 
@@ -528,7 +634,7 @@ export default function AdminResultAnalysisManager() {
         </div>
       </section>
 
-           {/* Bảng kết quả */}
+      {/* Bảng kết quả */}
       <section className="border rounded-lg p-4 bg-white overflow-hidden">
         <div className="flex items-center justify-between mb-2">
           <h2 className="font-semibold">
@@ -556,9 +662,7 @@ export default function AdminResultAnalysisManager() {
           </div>
         ) : (
           <>
-            {/* KHUNG BẢNG – chỉ phần này mới được phép scroll ngang */}
             <div className="border rounded w-full max-w-full overflow-x-auto overflow-y-auto max-h-[600px]">
-              {/* table-fixed giúp cột co lại đều hơn, không bị phình vô lý */}
               <table className="text-sm border-collapse w-full table-fixed">
                 <thead className="bg-gray-100 sticky top-0 z-10">
                   <tr>
@@ -577,12 +681,8 @@ export default function AdminResultAnalysisManager() {
                     {allOptionLabels.map((label) => (
                       <th
                         key={label}
-                        className="
-                          border px-1 py-1 text-center text-xs
-                          align-top
-                        "
+                        className="border px-1 py-1 text-center text-xs align-top"
                       >
-                        {/* cho phép xuống dòng để cột hẹp lại */}
                         {label}
                       </th>
                     ))}
@@ -638,10 +738,8 @@ export default function AdminResultAnalysisManager() {
                             label.toLowerCase().includes('không thiết yếu');
 
                           let cellClass =
-                            // bỏ whitespace-nowrap + width lớn
                             'border px-1 py-1 text-center align-top text-xs';
 
-                          // tô đỏ ô nếu dưới cut-off đồng thuận (và không phải cột Không thiết yếu)
                           if (
                             val !== null &&
                             val < cutOffConsensus &&
@@ -650,7 +748,6 @@ export default function AdminResultAnalysisManager() {
                             cellClass += ' bg-red-100';
                           }
 
-                          // nếu cột "Không thiết yếu" và hàng này vượt ngưỡng, cho đỏ đậm hơn
                           if (
                             isNonEssentialCell &&
                             isRowHighNonEssential &&
@@ -672,7 +769,6 @@ export default function AdminResultAnalysisManager() {
               </table>
             </div>
 
-            {/* phân trang */}
             <div className="flex items-center justify-between mt-3 text-sm">
               <div>
                 Trang {currentPage}/{totalPages}
