@@ -1,4 +1,3 @@
-// app/admin/AdminCommentSummaryManager.tsx
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
@@ -14,6 +13,8 @@ type Round = {
 type Project = {
   id: string;
   title: string;
+  status: string;
+  created_at: string;
   rounds: Round[];
 };
 
@@ -58,32 +59,53 @@ function truncate(text: string, maxWords = 10): string {
 }
 
 export default function AdminCommentSummaryManager() {
+  // ===== STATE CHUNG =====
   const [projects, setProjects] = useState<Project[]>([]);
   const [loadingProjects, setLoadingProjects] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const [selectedProjectId, setSelectedProjectId] = useState<string>(''); // 1 project
-  const [selectedRoundId, setSelectedRoundId] = useState<string>(''); // 1 round
+  // Map project_id -> tập cohort_code (đối tượng) có tham gia bất kỳ vòng nào
+  const [projectCohortMap, setProjectCohortMap] = useState<
+    Record<string, Set<string>>
+  >({});
 
+  // Filter bar
+  const [projectStatusFilter, setProjectStatusFilter] = useState<'all' | string>(
+    'all'
+  );
+  const [cohortFilter, setCohortFilter] = useState<'all' | string>('all');
+  const [createdFrom, setCreatedFrom] = useState<string>('');
+  const [createdTo, setCreatedTo] = useState<string>('');
+  const [searchText, setSearchText] = useState<string>('');
+
+  // Options cho filter
+  const [cohortOptions, setCohortOptions] = useState<string[]>([]);
+
+  // Lựa chọn Project / Round hiện tại để load comment
+  const [selectedProjectId, setSelectedProjectId] = useState<string>('');
+  const [selectedRoundId, setSelectedRoundId] = useState<string>('');
+
+  // Comment & phân trang comment
   const [comments, setComments] = useState<CommentRow[]>([]);
   const [loadingComments, setLoadingComments] = useState(false);
-
   const [currentPage, setCurrentPage] = useState(1);
 
+  // GPT summary
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>('impact');
   const [customPrompt, setCustomPrompt] = useState('');
   const [summary, setSummary] = useState('');
   const [loadingSummary, setLoadingSummary] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
-  // Load projects + rounds
+  // ===== LOAD PROJECTS + ROUNDS + COHORT MAP =====
   useEffect(() => {
     const loadProjects = async () => {
       setLoadingProjects(true);
       setError(null);
 
+      // 1) Projects
       const { data: projectsData, error: projErr } = await supabase
         .from('projects')
-        .select('id, title, status');
+        .select('id, title, status, created_at');
 
       if (projErr) {
         setError('Lỗi truy vấn projects: ' + projErr.message);
@@ -93,6 +115,7 @@ export default function AdminCommentSummaryManager() {
 
       const projectIds = (projectsData || []).map((p) => p.id);
 
+      // 2) Rounds
       const { data: roundsData, error: roundErr } = await supabase
         .from('rounds')
         .select('id, project_id, round_number, status')
@@ -105,15 +128,17 @@ export default function AdminCommentSummaryManager() {
       }
 
       const projMap: Record<string, Project> = {};
-      (projectsData || []).forEach((p) => {
+      (projectsData || []).forEach((p: any) => {
         projMap[p.id] = {
           id: p.id,
           title: p.title,
+          status: p.status,
+          created_at: p.created_at,
           rounds: [],
         };
       });
 
-      (roundsData || []).forEach((r) => {
+      (roundsData || []).forEach((r: any) => {
         const p = projMap[r.project_id];
         if (p) {
           p.rounds.push({
@@ -130,6 +155,45 @@ export default function AdminCommentSummaryManager() {
       );
       setProjects(projList);
 
+      // 3) Map project ↔ cohort thông qua round_participants + profiles
+      try {
+        // IMPORTANT: tên quan hệ 'profiles' và 'rounds' giả định theo FK mặc định:
+        // round_participants.round_id -> rounds.id
+        // round_participants.user_id -> profiles.id
+        // Nếu schema của anh đặt tên khác, chỉnh lại chuỗi trong select().
+        const { data: rpData, error: rpErr } = await supabase
+          .from('round_participants')
+          .select(
+            `
+            round_id,
+            rounds!inner(project_id),
+            profiles!inner(id, cohort_code)
+          `
+          );
+
+        if (rpErr) {
+          console.error('Lỗi truy vấn round_participants:', rpErr);
+        } else if (rpData) {
+          const map: Record<string, Set<string>> = {};
+          const cohortSet = new Set<string>();
+
+          (rpData as any[]).forEach((row) => {
+            const projId = row.rounds?.project_id as string | undefined;
+            const cohort = row.profiles?.cohort_code as string | null | undefined;
+            if (!projId || !cohort) return;
+
+            cohortSet.add(cohort);
+            if (!map[projId]) map[projId] = new Set<string>();
+            map[projId].add(cohort);
+          });
+
+          setProjectCohortMap(map);
+          setCohortOptions(Array.from(cohortSet).sort());
+        }
+      } catch (e) {
+        console.error('Lỗi khi build projectCohortMap:', e);
+      }
+
       // Nếu chưa chọn project, auto chọn project đầu tiên
       if (!selectedProjectId && projList.length > 0) {
         setSelectedProjectId(projList[0].id);
@@ -142,28 +206,95 @@ export default function AdminCommentSummaryManager() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // ===== DERIVED: STATUS OPTIONS, PROJECT FILTERED LIST =====
+  const projectStatusOptions = useMemo(
+    () => Array.from(new Set(projects.map((p) => p.status))).sort(),
+    [projects]
+  );
+
+  const filteredProjects = useMemo(() => {
+    let list = [...projects];
+
+    // 1) Trạng thái project
+    if (projectStatusFilter !== 'all') {
+      list = list.filter((p) => p.status === projectStatusFilter);
+    }
+
+    // 2) Đối tượng (cohort) – chỉ giữ các project có cohort đó trong map
+    if (cohortFilter !== 'all') {
+      list = list.filter((p) => {
+        const cohorts = projectCohortMap[p.id];
+        return cohorts ? cohorts.has(cohortFilter) : false;
+      });
+    }
+
+    // 3) Ngày tạo (from / to)
+    if (createdFrom) {
+      const fromDate = new Date(createdFrom);
+      list = list.filter((p) => {
+        const d = new Date(p.created_at);
+        return !Number.isNaN(d.getTime()) && d >= fromDate;
+      });
+    }
+
+    if (createdTo) {
+      const toDate = new Date(createdTo);
+      // cho toDate bao gồm cả ngày đó (nếu cần, cộng thêm 1 ngày)
+      const toDateEnd = new Date(toDate);
+      toDateEnd.setDate(toDateEnd.getDate() + 1);
+
+      list = list.filter((p) => {
+        const d = new Date(p.created_at);
+        return !Number.isNaN(d.getTime()) && d < toDateEnd;
+      });
+    }
+
+    // 4) Search theo tên
+    const k = searchText.trim().toLowerCase();
+    if (k) {
+      list = list.filter((p) => p.title.toLowerCase().includes(k));
+    }
+
+    // Ưu tiên project mới tạo gần đây
+    list.sort(
+      (a, b) =>
+        new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+    );
+
+    return list;
+  }, [
+    projects,
+    projectStatusFilter,
+    cohortFilter,
+    projectCohortMap,
+    createdFrom,
+    createdTo,
+    searchText,
+  ]);
+
   const selectedProject = useMemo(
     () => projects.find((p) => p.id === selectedProjectId) || null,
     [projects, selectedProjectId]
   );
 
-  const roundsOfProject = useMemo(
+  const roundsOfSelectedProject = useMemo(
     () =>
       selectedProject
-        ? selectedProject.rounds.sort(
+        ? [...selectedProject.rounds].sort(
             (a, b) => a.round_number - b.round_number
           )
         : [],
     [selectedProject]
   );
 
-  // Reset round & data khi đổi project
-  const handleProjectChange = (id: string) => {
+  // ===== HANDLERS CHỌN PROJECT / VÒNG =====
+  const handleProjectRowClick = (id: string) => {
     setSelectedProjectId(id);
     setSelectedRoundId('');
     setComments([]);
     setSummary('');
     setCurrentPage(1);
+    setError(null);
   };
 
   const handleRoundChange = (id: string) => {
@@ -171,12 +302,12 @@ export default function AdminCommentSummaryManager() {
     setComments([]);
     setSummary('');
     setCurrentPage(1);
+    setError(null);
   };
 
-  const totalPages = Math.max(
-    1,
-    Math.ceil(comments.length / PAGE_SIZE)
-  );
+  // ===== COMMENT & PHÂN TRANG COMMENT =====
+  const totalPages = Math.max(1, Math.ceil(comments.length / PAGE_SIZE));
+
   const paginatedComments = useMemo(
     () =>
       comments.slice(
@@ -192,7 +323,7 @@ export default function AdminCommentSummaryManager() {
     setComments([]);
     setCurrentPage(1);
 
-    if (!selectedRoundId) {
+    if (!selectedProjectId || !selectedRoundId) {
       setError('Vui lòng chọn Project và Vòng.');
       return;
     }
@@ -202,7 +333,10 @@ export default function AdminCommentSummaryManager() {
       const res = await fetch('/api/admin/comments/raw', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ round_id: selectedRoundId }),
+        body: JSON.stringify({
+          round_id: selectedRoundId,
+          cohort_code: cohortFilter === 'all' ? null : cohortFilter,
+        }),
       });
 
       if (!res.ok) {
@@ -213,7 +347,9 @@ export default function AdminCommentSummaryManager() {
       const data = (await res.json()) as { comments: CommentRow[] };
       setComments(data.comments || []);
       if (!data.comments || data.comments.length === 0) {
-        setError('Không tìm thấy ý kiến nào (có thể câu hỏi không có ô comment).');
+        setError(
+          'Không tìm thấy ý kiến nào (có thể câu hỏi không có ô comment hoặc không có người tham gia thuộc đối tượng này).'
+        );
       }
     } catch (e: any) {
       console.error(e);
@@ -223,6 +359,7 @@ export default function AdminCommentSummaryManager() {
     }
   };
 
+  // ===== GPT SUMMARY =====
   const handleSummarize = async () => {
     setError(null);
     setSummary('');
@@ -237,10 +374,10 @@ export default function AdminCommentSummaryManager() {
       PROMPT_TEMPLATES[0];
 
     const project_title = selectedProject?.title || '';
-    const roundObj = roundsOfProject.find((r) => r.id === selectedRoundId);
-    const round_label = roundObj
-      ? `Vòng ${roundObj.round_number}`
-      : '';
+    const roundObj = roundsOfSelectedProject.find(
+      (r) => r.id === selectedRoundId
+    );
+    const round_label = roundObj ? `Vòng ${roundObj.round_number}` : '';
 
     const commentTexts = comments.map((c) => c.comment);
 
@@ -255,6 +392,10 @@ export default function AdminCommentSummaryManager() {
           comments: commentTexts,
           base_prompt: template.text,
           custom_prompt: customPrompt,
+          cohort_label:
+            cohortFilter === 'all'
+              ? null
+              : `Đối tượng: ${cohortFilter}`,
         }),
       });
 
@@ -263,7 +404,10 @@ export default function AdminCommentSummaryManager() {
         throw new Error(text || 'Request failed');
       }
 
-      const data = (await res.json()) as { summary?: string; error?: string };
+      const data = (await res.json()) as {
+        summary?: string;
+        error?: string;
+      };
       if (data.error) {
         setError('GPT báo lỗi: ' + data.error);
       } else {
@@ -281,29 +425,192 @@ export default function AdminCommentSummaryManager() {
     PROMPT_TEMPLATES.find((t) => t.id === selectedTemplateId) ||
     PROMPT_TEMPLATES[0];
 
+  // ===== RENDER =====
   return (
     <div className="space-y-6 max-w-full overflow-x-hidden">
       <h1 className="text-xl font-bold mb-2">💬 Tổng hợp ý kiến</h1>
 
-      {/* Chọn project & vòng */}
-      <section className="border rounded-lg p-4 bg-gray-50 space-y-3">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+      {/* 1) BỘ LỌC PROJECT (giống style trang phân tích) */}
+      <section className="border rounded-lg p-4 bg-gray-50 space-y-3 overflow-hidden">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+          {/* Tìm theo tên Project */}
           <div>
             <label className="block text-sm font-semibold mb-1">
-              Project
+              Tìm theo tên Project
+            </label>
+            <input
+              type="text"
+              className="w-full border rounded px-2 py-1 text-sm"
+              placeholder="Nhập một phần tên Project..."
+              value={searchText}
+              onChange={(e) => setSearchText(e.target.value)}
+            />
+          </div>
+
+          {/* Trạng thái Project */}
+          <div>
+            <label className="block text-sm font-semibold mb-1">
+              Trạng thái Project
             </label>
             <select
               className="w-full border rounded px-2 py-1 text-sm"
-              value={selectedProjectId}
-              onChange={(e) => handleProjectChange(e.target.value)}
+              value={projectStatusFilter}
+              onChange={(e) =>
+                setProjectStatusFilter(e.target.value as 'all' | string)
+              }
             >
-              <option value="">-- Chọn Project --</option>
-              {projects.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.title}
+              <option value="all">Tất cả</option>
+              {projectStatusOptions.map((st) => (
+                <option key={st} value={st}>
+                  {st}
                 </option>
               ))}
             </select>
+          </div>
+
+          {/* Đối tượng (cohort) */}
+          <div>
+            <label className="block text-sm font-semibold mb-1">
+              Đối tượng (cohort)
+            </label>
+            <select
+              className="w-full border rounded px-2 py-1 text-sm"
+              value={cohortFilter}
+              onChange={(e) =>
+                setCohortFilter(e.target.value as 'all' | string)
+              }
+            >
+              <option value="all">Tất cả</option>
+              {cohortOptions.map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Ngày tạo */}
+          <div className="flex flex-col gap-1">
+            <label className="block text-sm font-semibold">
+              Ngày tạo Project
+            </label>
+            <div className="flex gap-2">
+              <input
+                type="date"
+                className="border rounded px-2 py-1 text-xs w-1/2"
+                value={createdFrom}
+                onChange={(e) => setCreatedFrom(e.target.value)}
+              />
+              <input
+                type="date"
+                className="border rounded px-2 py-1 text-xs w-1/2"
+                value={createdTo}
+                onChange={(e) => setCreatedTo(e.target.value)}
+              />
+            </div>
+          </div>
+        </div>
+
+        <div className="flex items-center justify-between text-sm text-gray-600 mt-1">
+          <span>
+            Tổng Project: <b>{projects.length}</b> · Sau lọc:{' '}
+            <b>{filteredProjects.length}</b>
+          </span>
+          {loadingProjects && (
+            <span className="text-gray-500">
+              Đang tải project / vòng / đối tượng...
+            </span>
+          )}
+          {error && (
+            <span className="text-red-600">
+              {error}
+            </span>
+          )}
+        </div>
+      </section>
+
+      {/* 2) BẢNG PROJECT SAU LỌC + CHỌN VÒNG + TẢI Ý KIẾN */}
+      <section className="border rounded-lg p-4 bg-white space-y-3 overflow-hidden">
+        <h2 className="font-semibold mb-2">Chọn Project & Vòng để xem ý kiến</h2>
+
+        {/* Bảng Project */}
+        {filteredProjects.length === 0 ? (
+          <div className="text-sm text-gray-500 italic">
+            Không có Project nào phù hợp bộ lọc.
+          </div>
+        ) : (
+          <div className="border rounded max-h-72 overflow-auto">
+            <table className="w-full text-sm border-collapse">
+              <thead className="bg-gray-100 sticky top-0 z-10">
+                <tr>
+                  <th className="border px-2 py-1 text-center w-10">#</th>
+                  <th className="border px-2 py-1 text-left">Tên Project</th>
+                  <th className="border px-2 py-1 text-center w-24">
+                    Trạng thái
+                  </th>
+                  <th className="border px-2 py-1 text-center w-32">
+                    Ngày tạo
+                  </th>
+                  <th className="border px-2 py-1 text-center w-24">
+                    Số vòng
+                  </th>
+                  <th className="border px-2 py-1 text-center w-32">
+                    Số đối tượng
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredProjects.map((p, idx) => {
+                  const cohorts = projectCohortMap[p.id];
+                  const cohortCount = cohorts ? cohorts.size : 0;
+                  const isSelected = p.id === selectedProjectId;
+
+                  return (
+                    <tr
+                      key={p.id}
+                      className={
+                        'cursor-pointer hover:bg-blue-50 ' +
+                        (isSelected ? 'bg-blue-50' : '')
+                      }
+                      onClick={() => handleProjectRowClick(p.id)}
+                    >
+                      <td className="border px-2 py-1 text-center align-top">
+                        {idx + 1}
+                      </td>
+                      <td className="border px-2 py-1 align-top">
+                        <div className="font-semibold">{p.title}</div>
+                      </td>
+                      <td className="border px-2 py-1 text-center align-top">
+                        {p.status}
+                      </td>
+                      <td className="border px-2 py-1 text-center align-top">
+                        {new Date(p.created_at).toLocaleDateString()}
+                      </td>
+                      <td className="border px-2 py-1 text-center align-top">
+                        {p.rounds.length}
+                      </td>
+                      <td className="border px-2 py-1 text-center align-top">
+                        {cohortCount}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {/* Chọn vòng & tải ý kiến */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-3">
+          <div>
+            <label className="block text-sm font-semibold mb-1">
+              Project đang chọn
+            </label>
+            <div className="text-sm">
+              {selectedProject
+                ? selectedProject.title
+                : 'Chưa chọn. Hãy click một Project trong bảng.'}
+            </div>
           </div>
 
           <div>
@@ -314,9 +621,10 @@ export default function AdminCommentSummaryManager() {
               className="w-full border rounded px-2 py-1 text-sm"
               value={selectedRoundId}
               onChange={(e) => handleRoundChange(e.target.value)}
+              disabled={!selectedProject}
             >
               <option value="">-- Chọn vòng --</option>
-              {roundsOfProject.map((r) => (
+              {roundsOfSelectedProject.map((r) => (
                 <option key={r.id} value={r.id}>
                   Vòng {r.round_number} ({r.status})
                 </option>
@@ -328,26 +636,27 @@ export default function AdminCommentSummaryManager() {
             <button
               type="button"
               className="px-4 py-2 rounded-lg bg-blue-600 text-white font-semibold text-sm hover:bg-blue-700 disabled:opacity-50"
-              disabled={!selectedRoundId || loadingComments || loadingProjects}
+              disabled={
+                !selectedProjectId ||
+                !selectedRoundId ||
+                loadingComments ||
+                loadingProjects
+              }
               onClick={handleLoadComments}
             >
               {loadingComments ? 'Đang tải ý kiến…' : 'Tải ý kiến'}
             </button>
           </div>
         </div>
-        {loadingProjects && (
-          <div className="text-sm text-gray-500">
-            Đang tải project & vòng...
-          </div>
-        )}
+
         {error && (
-          <div className="text-sm text-red-600">
+          <div className="text-sm text-red-600 mt-2">
             {error}
           </div>
         )}
       </section>
 
-      {/* Bảng ý kiến thô */}
+      {/* 3) BẢNG Ý KIẾN THÔ */}
       <section className="border rounded-lg p-4 bg-white overflow-hidden">
         <div className="flex items-center justify-between mb-2">
           <h2 className="font-semibold">
@@ -362,7 +671,8 @@ export default function AdminCommentSummaryManager() {
 
         {comments.length === 0 ? (
           <div className="text-sm text-gray-500 italic">
-            Chưa có ý kiến. Hãy chọn Project, Vòng và bấm "Tải ý kiến".
+            Chưa có ý kiến. Hãy chọn Project, Vòng, Đối tượng và bấm
+            &quot;Tải ý kiến&quot;.
           </div>
         ) : (
           <>
@@ -428,7 +738,7 @@ export default function AdminCommentSummaryManager() {
         )}
       </section>
 
-      {/* Khu vực GPT tóm tắt */}
+      {/* 4) KHU VỰC GPT TÓM TẮT */}
       <section className="border rounded-lg p-4 bg-gray-50 space-y-3">
         <h2 className="font-semibold mb-1">
           GPT tổng hợp ý kiến
