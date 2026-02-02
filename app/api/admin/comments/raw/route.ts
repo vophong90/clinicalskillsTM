@@ -95,6 +95,10 @@ export async function POST(req: NextRequest) {
     typeof body.cohort_code === 'string' ? body.cohort_code.trim() : '';
   const cohort_code: string | null = cohort_code_raw || null;
 
+  // mode = "meta" => chỉ trả meta cohort/participants, không load comments
+  const mode: 'full' | 'meta' =
+    body.mode === 'meta' ? 'meta' : 'full';
+
   if (!round_id) {
     return NextResponse.json({ error: 'round_id là bắt buộc' }, { status: 400 });
   }
@@ -108,7 +112,12 @@ export async function POST(req: NextRequest) {
       .maybeSingle();
 
     if (roundErr) throw new Error('Lỗi truy vấn rounds: ' + roundErr.message);
-    if (!roundData) return NextResponse.json({ comments: [] });
+    if (!roundData) {
+      return NextResponse.json({
+        comments: [],
+        meta: { cohort_code, cohort_options: [], cohort_count_in_project: 0, cohort_count_in_round: 0, participant_count_in_round: 0, participant_count_in_round_by_cohort: 0 },
+      });
+    }
 
     const round = roundData as DBRound;
 
@@ -120,9 +129,96 @@ export async function POST(req: NextRequest) {
       .maybeSingle();
 
     if (projErr) throw new Error('Lỗi truy vấn projects: ' + projErr.message);
-    if (!projectData) return NextResponse.json({ comments: [] });
+    if (!projectData) {
+      return NextResponse.json({
+        comments: [],
+        meta: { cohort_code, cohort_options: [], cohort_count_in_project: 0, cohort_count_in_round: 0, participant_count_in_round: 0, participant_count_in_round_by_cohort: 0 },
+      });
+    }
 
     const project = projectData as DBProject;
+
+    // ===== META: cohorts & participants (không phụ thuộc responses) =====
+    // A) participants of THIS round + cohort distribution
+    const { data: rpRound, error: rpRoundErr } = await s
+      .from('round_participants')
+      .select(
+        `
+        user_id,
+        profiles!inner(cohort_code)
+      `
+      )
+      .eq('round_id', round_id);
+
+    if (rpRoundErr) {
+      throw new Error('Lỗi truy vấn round_participants(round): ' + rpRoundErr.message);
+    }
+
+    const participantSet = new Set<string>();
+    const cohortSetInRound = new Set<string>();
+    const cohortCountMapInRound = new Map<string, number>(); // cohort -> count users
+
+    (rpRound || []).forEach((row: any) => {
+      const uid = row.user_id as string | undefined;
+      const cohort = row.profiles?.cohort_code as string | null | undefined;
+      if (!uid) return;
+      participantSet.add(uid);
+      if (cohort) {
+        cohortSetInRound.add(cohort);
+        cohortCountMapInRound.set(cohort, (cohortCountMapInRound.get(cohort) || 0) + 1);
+      }
+    });
+
+    const participant_count_in_round = participantSet.size;
+    const cohort_count_in_round = cohortSetInRound.size;
+    const participant_count_in_round_by_cohort =
+      cohort_code ? (cohortCountMapInRound.get(cohort_code) || 0) : 0;
+
+    // B) cohort options of THIS project (tất cả cohort đã từng được mời trong các round của project)
+    const { data: rpProj, error: rpProjErr } = await s
+      .from('round_participants')
+      .select(
+        `
+        round_id,
+        rounds!inner(project_id),
+        profiles!inner(cohort_code)
+      `
+      )
+      .eq('rounds.project_id', round.project_id);
+
+    if (rpProjErr) {
+      throw new Error('Lỗi truy vấn round_participants(project): ' + rpProjErr.message);
+    }
+
+    const cohortSetInProject = new Set<string>();
+    (rpProj || []).forEach((row: any) => {
+      const cohort = row.profiles?.cohort_code as string | null | undefined;
+      if (cohort) cohortSetInProject.add(cohort);
+    });
+
+    const cohort_options = Array.from(cohortSetInProject).sort();
+    const cohort_count_in_project = cohort_options.length;
+
+    // Nếu chỉ cần meta thì trả luôn
+    if (mode === 'meta') {
+      return NextResponse.json({
+        comments: [],
+        meta: {
+          project_id: project.id,
+          project_title: project.title,
+          round_id: round.id,
+          round_label: `Vòng ${round.round_number}`,
+          cohort_code,
+          cohort_options,
+          cohort_count_in_project,
+          cohort_count_in_round,
+          participant_count_in_round,
+          participant_count_in_round_by_cohort,
+        },
+      });
+    }
+
+    // ===== FULL: load items + responses + extract comments =====
 
     // 3) Lấy items của round này
     const { data: itemsData, error: itemsErr } = await s
@@ -138,37 +234,35 @@ export async function POST(req: NextRequest) {
     });
 
     // 4) Nếu có filter cohort_code -> lấy user_id thuộc cohort đó TRONG round_participants của round
-    //    (đây là chỗ “đúng logic đối tượng”)
     let allowedUserIds: string[] | null = null;
 
     if (cohort_code) {
-      // Join chắc kèo theo FK; nếu FK name của anh khác, đổi lại đúng tên.
-      // round_participants.user_id -> profiles.id
-      const { data: rpData, error: rpErr } = await s
-        .from('round_participants')
-        .select(
-          `user_id, profiles:profiles!round_participants_user_id_fkey(cohort_code)`
-        )
-        .eq('round_id', round_id);
-
-      if (rpErr) {
-        throw new Error('Lỗi truy vấn round_participants: ' + rpErr.message);
-      }
-
-      const ids = (rpData || [])
+      // Dùng ngay rpRound đã load ở trên để khỏi query lại
+      const ids = (rpRound || [])
         .filter((row: any) => row.profiles?.cohort_code === cohort_code)
         .map((row: any) => row.user_id as string)
         .filter(Boolean);
 
       allowedUserIds = ids;
 
-      // Nếu cohort không có ai trong round -> trả rỗng luôn (đỡ query responses)
       if (allowedUserIds.length === 0) {
         return NextResponse.json({
           comments: [],
           total_responses_filtered: 0,
           total_responses_all: 0,
           cohort_code,
+          meta: {
+            project_id: project.id,
+            project_title: project.title,
+            round_id: round.id,
+            round_label: `Vòng ${round.round_number}`,
+            cohort_code,
+            cohort_options,
+            cohort_count_in_project,
+            cohort_count_in_round,
+            participant_count_in_round,
+            participant_count_in_round_by_cohort,
+          },
         });
       }
     }
@@ -185,8 +279,6 @@ export async function POST(req: NextRequest) {
         .eq('round_id', round_id)
         .eq('is_submitted', true);
 
-      // Nếu lọc cohort -> chỉ lấy response của allowedUserIds
-      // (in() giới hạn length; nếu cohort quá đông có thể phải chunk, nhưng thường ok)
       if (allowedUserIds) {
         q = q.in('user_id', allowedUserIds);
       }
@@ -198,13 +290,11 @@ export async function POST(req: NextRequest) {
       }
 
       const batch = (data || []) as DBResponse[];
-
       if (batch.length === 0) break;
 
       allResponses.push(...batch);
 
       if (batch.length < PAGE) break;
-
       from += PAGE;
     }
 
@@ -243,6 +333,18 @@ export async function POST(req: NextRequest) {
       total_responses_filtered: comments.length,
       total_responses_all: allResponses.length,
       cohort_code,
+      meta: {
+        project_id: project.id,
+        project_title: project.title,
+        round_id: round.id,
+        round_label: `Vòng ${round.round_number}`,
+        cohort_code,
+        cohort_options,
+        cohort_count_in_project,
+        cohort_count_in_round,
+        participant_count_in_round,
+        participant_count_in_round_by_cohort,
+      },
     });
   } catch (e: any) {
     console.error('Error in /api/admin/comments/raw:', e);
