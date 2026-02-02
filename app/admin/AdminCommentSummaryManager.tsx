@@ -72,10 +72,15 @@ async function fetchRoundMeta(roundId: string) {
 
   return (await res.json()) as {
     meta?: {
+      project_id?: string;
+      project_title?: string;
+      round_id?: string;
+      round_label?: string;
       cohort_options?: string[];
       cohort_count_in_project?: number;
       cohort_count_in_round?: number;
       participant_count_in_round?: number;
+      participant_count_in_round_by_cohort?: number;
     };
   };
 }
@@ -118,7 +123,7 @@ export default function AdminCommentSummaryManager() {
   const [summary, setSummary] = useState('');
   const [loadingSummary, setLoadingSummary] = useState(false);
 
-  // ===== LOAD PROJECTS + ROUNDS + COHORT MAP =====
+  // ===== LOAD PROJECTS + ROUNDS + COHORT MAP (qua API meta) =====
   useEffect(() => {
     const loadProjects = async () => {
       setLoadingProjects(true);
@@ -177,34 +182,52 @@ export default function AdminCommentSummaryManager() {
       );
       setProjects(projList);
 
-      // 3) Build project ↔ cohort map (ĐÚNG)
-      const { data: rpAll, error: rpErr } = await supabase
-        .from('round_participants')
-        .select(`
-        round_id,
-        rounds!inner(project_id),
-        profiles!inner(cohort_code)
-        `);
-      
-      if (rpErr) {
-        console.error('Lỗi load round_participants:', rpErr);
-      } else {
+      // 3) Build project ↔ cohort map qua API admin (tránh RLS + tránh join mơ hồ)
+      try {
+        // chọn 1 round đại diện cho mỗi project (ưu tiên round_number lớn nhất)
+        const repRoundByProject = new Map<string, Round>();
+
+        (roundsData || []).forEach((r: any) => {
+          const cur = repRoundByProject.get(r.project_id);
+          if (!cur || (r.round_number ?? 0) > (cur.round_number ?? 0)) {
+            repRoundByProject.set(r.project_id, {
+              id: r.id,
+              project_id: r.project_id,
+              round_number: r.round_number,
+              status: r.status,
+            });
+          }
+        });
+
+        const reps = Array.from(repRoundByProject.values());
+
+        const results = await Promise.allSettled(
+          reps.map(async (rr) => {
+            const data = await fetchRoundMeta(rr.id);
+            return { project_id: rr.project_id, meta: data.meta };
+          })
+        );
+
         const map: Record<string, Set<string>> = {};
         const cohortSet = new Set<string>();
 
-        (rpAll || []).forEach((row: any) => {
-          const projectId = row.rounds?.project_id;
-          const cohort = row.profiles?.cohort_code;
+        results.forEach((r) => {
+          if (r.status !== 'fulfilled') return;
+          const { project_id, meta } = r.value;
+          const opts = meta?.cohort_options || [];
 
-          if (!projectId || !cohort) return;
-
-          if (!map[projectId]) map[projectId] = new Set<string>();
-          map[projectId].add(cohort);
-          cohortSet.add(cohort);
+          if (!map[project_id]) map[project_id] = new Set<string>();
+          opts.forEach((c) => {
+            if (!c) return;
+            map[project_id].add(c);
+            cohortSet.add(c);
+          });
         });
-        
+
         setProjectCohortMap(map);
         setCohortOptions(Array.from(cohortSet).sort());
+      } catch (e) {
+        console.error('Lỗi khi build projectCohortMap qua API:', e);
       }
 
       // Nếu chưa chọn project, auto chọn project đầu tiên
@@ -352,7 +375,9 @@ export default function AdminCommentSummaryManager() {
         throw new Error(text || 'Request failed');
       }
 
-      const data = (await res.json()) as { comments: CommentRow[] };
+      const data = (await res.json()) as { comments: CommentRow[]; error?: string };
+      if (data.error) throw new Error(data.error);
+
       setComments(data.comments || []);
       if (!data.comments || data.comments.length === 0) {
         setError(
@@ -489,7 +514,7 @@ export default function AdminCommentSummaryManager() {
             </select>
             {cohortOptions.length === 0 && (
               <div className="mt-1 text-xs text-gray-500 italic">
-                (Chưa có đối tượng — kiểm tra lại API / RLS / dữ liệu cohort_code)
+                (Chưa có đối tượng — kiểm tra dữ liệu round_participants / profiles.cohort_code)
               </div>
             )}
           </div>
