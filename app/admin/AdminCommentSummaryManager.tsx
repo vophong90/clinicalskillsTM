@@ -177,52 +177,34 @@ export default function AdminCommentSummaryManager() {
       );
       setProjects(projList);
 
-      // 3) Build project ↔ cohort map bằng API admin (tránh RLS)
-      try {
-        // chọn 1 round đại diện cho mỗi project (ưu tiên round_number lớn nhất)
-        const repRoundByProject = new Map<string, Round>();
-
-        (roundsData || []).forEach((r: any) => {
-          const cur = repRoundByProject.get(r.project_id);
-          if (!cur || (r.round_number ?? 0) > (cur.round_number ?? 0)) {
-            repRoundByProject.set(r.project_id, {
-              id: r.id,
-              project_id: r.project_id,
-              round_number: r.round_number,
-              status: r.status,
-            });
-          }
-        });
-
-        const reps = Array.from(repRoundByProject.values());
-
-        const results = await Promise.allSettled(
-          reps.map(async (rr) => {
-            const data = await fetchRoundMeta(rr.id);
-            return { project_id: rr.project_id, meta: data.meta };
-          })
-        );
-
+      // 3) Build project ↔ cohort map (ĐÚNG)
+      const { data: rpAll, error: rpErr } = await supabase
+        .from('round_participants')
+        .select(`
+        round_id,
+        rounds!inner(project_id),
+        profiles!inner(cohort_code)
+        `);
+      
+      if (rpErr) {
+        console.error('Lỗi load round_participants:', rpErr);
+      } else {
         const map: Record<string, Set<string>> = {};
         const cohortSet = new Set<string>();
 
-        results.forEach((r) => {
-          if (r.status !== 'fulfilled') return;
-          const { project_id, meta } = r.value;
-          const opts = meta?.cohort_options || [];
+        (rpAll || []).forEach((row: any) => {
+          const projectId = row.rounds?.project_id;
+          const cohort = row.profiles?.cohort_code;
 
-          if (!map[project_id]) map[project_id] = new Set<string>();
-          opts.forEach((c) => {
-            if (!c) return;
-            map[project_id].add(c);
-            cohortSet.add(c);
-          });
+          if (!projectId || !cohort) return;
+
+          if (!map[projectId]) map[projectId] = new Set<string>();
+          map[projectId].add(cohort);
+          cohortSet.add(cohort);
         });
-
+        
         setProjectCohortMap(map);
         setCohortOptions(Array.from(cohortSet).sort());
-      } catch (e) {
-        console.error('Lỗi khi build projectCohortMap qua API:', e);
       }
 
       // Nếu chưa chọn project, auto chọn project đầu tiên
