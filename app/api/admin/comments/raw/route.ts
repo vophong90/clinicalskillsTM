@@ -1,3 +1,4 @@
+// app/api/admin/comments/raw/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { getAdminClient } from '@/lib/supabase-admin';
 
@@ -83,10 +84,7 @@ export async function POST(req: NextRequest) {
   try {
     body = await req.json();
   } catch {
-    return NextResponse.json(
-      { error: 'Body phải là JSON' },
-      { status: 400 }
-    );
+    return NextResponse.json({ error: 'Body phải là JSON' }, { status: 400 });
   }
 
   const round_id: string | null =
@@ -98,72 +96,102 @@ export async function POST(req: NextRequest) {
   const cohort_code: string | null = cohort_code_raw || null;
 
   if (!round_id) {
-    return NextResponse.json(
-      { error: 'round_id là bắt buộc' },
-      { status: 400 }
-    );
+    return NextResponse.json({ error: 'round_id là bắt buộc' }, { status: 400 });
   }
 
   try {
-    // 1. Lấy round
+    // 1) Lấy round
     const { data: roundData, error: roundErr } = await s
       .from('rounds')
       .select('id, project_id, round_number')
       .eq('id', round_id)
       .maybeSingle();
 
-    if (roundErr) {
-      throw new Error('Lỗi truy vấn rounds: ' + roundErr.message);
-    }
-    if (!roundData) {
-      return NextResponse.json({ comments: [] });
-    }
+    if (roundErr) throw new Error('Lỗi truy vấn rounds: ' + roundErr.message);
+    if (!roundData) return NextResponse.json({ comments: [] });
 
     const round = roundData as DBRound;
 
-    // 2. Lấy project
+    // 2) Lấy project
     const { data: projectData, error: projErr } = await s
       .from('projects')
       .select('id, title')
       .eq('id', round.project_id)
       .maybeSingle();
 
-    if (projErr) {
-      throw new Error('Lỗi truy vấn projects: ' + projErr.message);
-    }
-    if (!projectData) {
-      return NextResponse.json({ comments: [] });
-    }
+    if (projErr) throw new Error('Lỗi truy vấn projects: ' + projErr.message);
+    if (!projectData) return NextResponse.json({ comments: [] });
 
     const project = projectData as DBProject;
 
-    // 3. Lấy items của round này
+    // 3) Lấy items của round này
     const { data: itemsData, error: itemsErr } = await s
       .from('items')
       .select('id, prompt')
       .eq('round_id', round_id);
 
-    if (itemsErr) {
-      throw new Error('Lỗi truy vấn items: ' + itemsErr.message);
-    }
+    if (itemsErr) throw new Error('Lỗi truy vấn items: ' + itemsErr.message);
 
     const itemMap = new Map<string, DBItem>();
     (itemsData || []).forEach((it: any) => {
       itemMap.set(it.id, it as DBItem);
     });
 
-    // 4. Lấy responses (chỉ bản đã nộp) với PHÂN TRANG
+    // 4) Nếu có filter cohort_code -> lấy user_id thuộc cohort đó TRONG round_participants của round
+    //    (đây là chỗ “đúng logic đối tượng”)
+    let allowedUserIds: string[] | null = null;
+
+    if (cohort_code) {
+      // Join chắc kèo theo FK; nếu FK name của anh khác, đổi lại đúng tên.
+      // round_participants.user_id -> profiles.id
+      const { data: rpData, error: rpErr } = await s
+        .from('round_participants')
+        .select(
+          `user_id, profiles:profiles!round_participants_user_id_fkey(cohort_code)`
+        )
+        .eq('round_id', round_id);
+
+      if (rpErr) {
+        throw new Error('Lỗi truy vấn round_participants: ' + rpErr.message);
+      }
+
+      const ids = (rpData || [])
+        .filter((row: any) => row.profiles?.cohort_code === cohort_code)
+        .map((row: any) => row.user_id as string)
+        .filter(Boolean);
+
+      allowedUserIds = ids;
+
+      // Nếu cohort không có ai trong round -> trả rỗng luôn (đỡ query responses)
+      if (allowedUserIds.length === 0) {
+        return NextResponse.json({
+          comments: [],
+          total_responses_filtered: 0,
+          total_responses_all: 0,
+          cohort_code,
+        });
+      }
+    }
+
+    // 5) Lấy responses (chỉ bản đã nộp) với PHÂN TRANG
     const PAGE = 1000;
     let from = 0;
     const allResponses: DBResponse[] = [];
 
     while (true) {
-      const { data, error } = await s
+      let q = s
         .from('responses')
         .select('round_id, item_id, user_id, answer_json, is_submitted')
         .eq('round_id', round_id)
-        .eq('is_submitted', true)
-        .range(from, from + PAGE - 1);
+        .eq('is_submitted', true);
+
+      // Nếu lọc cohort -> chỉ lấy response của allowedUserIds
+      // (in() giới hạn length; nếu cohort quá đông có thể phải chunk, nhưng thường ok)
+      if (allowedUserIds) {
+        q = q.in('user_id', allowedUserIds);
+      }
+
+      const { data, error } = await q.range(from, from + PAGE - 1);
 
       if (error) {
         throw new Error('Lỗi truy vấn responses: ' + error.message);
@@ -171,57 +199,19 @@ export async function POST(req: NextRequest) {
 
       const batch = (data || []) as DBResponse[];
 
-      if (batch.length === 0) {
-        break;
-      }
+      if (batch.length === 0) break;
 
       allResponses.push(...batch);
 
-      if (batch.length < PAGE) {
-        // batch cuối cùng
-        break;
-      }
+      if (batch.length < PAGE) break;
 
       from += PAGE;
     }
 
-    // 5. Nếu có filter cohort_code -> xác định user_id nào thuộc cohort đó
-    let allowedUserIds: Set<string> | null = null;
-
-    if (cohort_code) {
-      const userIds = Array.from(
-        new Set(allResponses.map((r) => r.user_id).filter(Boolean))
-      ) as string[];
-
-      if (userIds.length > 0) {
-        const { data: profilesData, error: profilesErr } = await s
-          .from('profiles')
-          .select('id, cohort_code')
-          .in('id', userIds);
-
-        if (profilesErr) {
-          throw new Error('Lỗi truy vấn profiles: ' + profilesErr.message);
-        }
-
-        allowedUserIds = new Set(
-          (profilesData || [])
-            .filter((p: any) => p.cohort_code === cohort_code)
-            .map((p: any) => p.id as string)
-        );
-      } else {
-        allowedUserIds = new Set();
-      }
-    }
-
-    // 6. Extract comment
+    // 6) Extract comment
     const comments: CommentRow[] = [];
 
     allResponses.forEach((r) => {
-      // Nếu có filter đối tượng mà user không thuộc cohort -> bỏ
-      if (cohort_code && allowedUserIds && !allowedUserIds.has(r.user_id)) {
-        return;
-      }
-
       const c = extractComment(r.answer_json);
       if (!c) return;
 
@@ -252,12 +242,12 @@ export async function POST(req: NextRequest) {
       comments,
       total_responses_filtered: comments.length,
       total_responses_all: allResponses.length,
-      cohort_code: cohort_code,
+      cohort_code,
     });
   } catch (e: any) {
     console.error('Error in /api/admin/comments/raw:', e);
     return NextResponse.json(
-      { error: e.message || 'Internal Server Error' },
+      { error: e?.message || 'Internal Server Error' },
       { status: 500 }
     );
   }
