@@ -7,14 +7,22 @@ import AdminProjectManager from './AdminProjectManager';
 import AdminRoundManager from './AdminRoundManager';
 import AdminItemManager from './AdminItemManager';
 import AdminSurveyInviteManager from './AdminSurveyInviteManager';
+import AdminSurveyProgressManager from './AdminSurveyProgressManager';
 import AdminRewardResourceManager from './AdminRewardResourceManager';
-import AdminPasswordManager from './AdminPasswordManager';
 import AdminResultAnalysisManager from './AdminResultAnalysisManager';
 import AdminCommentSummaryManager from './AdminCommentSummaryManager';
 
 export default function AdminPage() {
   const [tab, setTab] = useState<
-    'users' | 'projects' | 'rounds' | 'items' | 'invites' | 'rewards' | 'passwords' | 'analysis' | 'comments'
+    | 'users'
+    | 'projects'
+    | 'rounds'
+    | 'items'
+    | 'invites'
+    | 'progress'
+    | 'rewards'
+    | 'analysis'
+    | 'comments'
   >('users');
 
   return (
@@ -91,6 +99,19 @@ export default function AdminPage() {
             <li>
               <button
                 className={`block w-full text-left px-3 py-2 rounded ${
+                  tab === 'progress'
+                    ? 'bg-blue-600 text-white font-bold'
+                    : 'hover:bg-blue-100'
+                }`}
+                onClick={() => setTab('progress')}
+              >
+                📊 Theo dõi khảo sát
+              </button>
+            </li>
+
+            <li>
+              <button
+                className={`block w-full text-left px-3 py-2 rounded ${
                   tab === 'rewards'
                     ? 'bg-blue-600 text-white font-bold'
                     : 'hover:bg-blue-100'
@@ -98,19 +119,6 @@ export default function AdminPage() {
                 onClick={() => setTab('rewards')}
               >
                 🎁 Tài nguyên thưởng
-              </button>
-            </li>
-
-            <li>
-              <button
-                className={`block w-full text-left px-3 py-2 rounded ${
-                  tab === 'passwords'
-                    ? 'bg-blue-600 text-white font-bold'
-                    : 'hover:bg-blue-100'
-                }`}
-                onClick={() => setTab('passwords')}
-              >
-                🔒 Quản lý mật khẩu
               </button>
             </li>
 
@@ -150,8 +158,8 @@ export default function AdminPage() {
         {tab === 'rounds' && <AdminRoundManager />}
         {tab === 'items' && <AdminItemManager />}
         {tab === 'invites' && <AdminSurveyInviteManager />}
+        {tab === 'progress' && <AdminSurveyProgressManager />}
         {tab === 'rewards' && <AdminRewardResourceManager />}
-        {tab === 'passwords' && <AdminPasswordManager />}
         {tab === 'analysis' && <AdminResultAnalysisManager />}
         {tab === 'comments' && <AdminCommentSummaryManager />}
       </main>
