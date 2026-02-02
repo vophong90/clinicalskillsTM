@@ -6,11 +6,13 @@ import { supabase } from '@/lib/supabaseClient';
 
 type Project = { id: string; title: string; status: string };
 type Round = { id: string; project_id: string; round_number: number };
+type AppRole = 'admin' | 'secretary' | 'viewer' | 'core_expert' | 'external_expert';
+
 type Profile = {
   id: string;
   email: string;
   name: string | null;
-  role: string;
+  role: AppRole;
   cohort_code: string | null;
 };
 
@@ -27,23 +29,35 @@ type ProgressRow = {
   invited_at?: string | null;
 };
 
-type InviteRole = 'core_expert' | 'external_expert';
-
-const INPUT =
-  'w-full border rounded-lg px-3 py-2 outline-none focus:border-blue-300 focus:ring-2 focus:ring-blue-200';
-const BTN =
-  'px-3 py-2 rounded-lg font-semibold bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50';
-const BTN2 =
-  'px-3 py-2 rounded-lg font-semibold border border-slate-300 hover:bg-slate-50 disabled:opacity-50';
-
-// Đổi giá trị này nếu enum hoạt động của bạn có tên khác ('published', 'open', ...).
 const ACTIVE_STATUS = 'active';
 
-/** --- Lightweight CSV parser (no dependency) ---
- *  - Supports commas, quotes, escaped quotes ("")
- *  - Supports CRLF/LF newlines
- *  - Returns array of objects using header row
- */
+const ROLE_OPTIONS: { value: AppRole; label: string }[] = [
+  { value: 'admin', label: 'Admin' },
+  { value: 'secretary', label: 'Thư ký' },
+  { value: 'viewer', label: 'Viewer' },
+  { value: 'core_expert', label: 'Chuyên gia nòng cốt' },
+  { value: 'external_expert', label: 'Chuyên gia bên ngoài' },
+];
+
+const UI = {
+  input:
+    'w-full border rounded-lg px-3 py-2 outline-none focus:border-blue-300 focus:ring-2 focus:ring-blue-200',
+  select:
+    'w-full border rounded-lg px-3 py-2 outline-none focus:border-blue-300 focus:ring-2 focus:ring-blue-200 bg-white',
+  btn:
+    'px-4 py-2 rounded-lg font-semibold bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50',
+  btn2:
+    'px-4 py-2 rounded-lg font-semibold border border-slate-300 hover:bg-slate-50 disabled:opacity-50',
+  card: 'border rounded-xl bg-white p-4 shadow-sm',
+  title: 'text-lg font-semibold',
+  muted: 'text-sm text-slate-500',
+};
+
+function isAppRole(x: any): x is AppRole {
+  return ROLE_OPTIONS.some((o) => o.value === x);
+}
+
+/** --- CSV parser --- */
 function parseCsvToObjects(text: string): Record<string, string>[] {
   const rows: string[][] = [];
   const s = text
@@ -110,34 +124,30 @@ function parseCsvToObjects(text: string): Record<string, string>[] {
   return out;
 }
 
-function normalizeInviteRole(v: any): InviteRole | null {
-  const s = String(v || '').trim();
-  if (s === 'core_expert') return 'core_expert';
-  if (s === 'external_expert') return 'external_expert';
-  return null;
-}
-
 export default function AdminSurveyInviteManager() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [rounds, setRounds] = useState<Round[]>([]);
   const [profiles, setProfiles] = useState<Profile[]>([]);
 
-  // Bộ lọc & chọn
-  const [filterProject, setFilterProject] = useState('');
-  const [filterStatus, setFilterStatus] = useState('');
-  const [filterRole, setFilterRole] = useState<'' | InviteRole>('');
-  const [filterEmailAge, setFilterEmailAge] = useState<'' | 'never' | 'recent_7' | 'older_7'>('');
-  const [filterCohort, setFilterCohort] = useState('');
+  // Step 2: chọn rounds
   const [selectedRoundIds, setSelectedRoundIds] = useState<string[]>([]);
-  const [checkedProfiles, setCheckedProfiles] = useState<Record<string, boolean>>({});
+
+  // Step 3: filters
   const [q, setQ] = useState('');
+  const [filterRole, setFilterRole] = useState<'all' | AppRole>('all');
+  const [filterCohort, setFilterCohort] = useState<string>(''); // '' = all, '__NULL__' = null
 
-  // ✅ NEW: chọn role khi mời
-  const [inviteRoleDefault, setInviteRoleDefault] = useState<InviteRole>('external_expert');
-  // override theo từng profile (chỉ lưu khi user đổi)
-  const [inviteRoleByProfile, setInviteRoleByProfile] = useState<Record<string, InviteRole>>({});
+  // Lọc theo “độ tuổi” email gửi lần cuối (7 ngày)
+  const [filterEmailAge, setFilterEmailAge] = useState<'' | 'never' | 'recent_7' | 'older_7'>('');
 
-  // Pagination for step (3)
+  // selection
+  const [checkedProfiles, setCheckedProfiles] = useState<Record<string, boolean>>({});
+
+  // Role assignment khi invite
+  const [defaultInviteRole, setDefaultInviteRole] = useState<AppRole>('external_expert');
+  const [inviteRoleMap, setInviteRoleMap] = useState<Record<string, AppRole>>({}); // per profile override
+
+  // pagination
   const PAGE_SIZE_PROFILES = 100;
   const [page, setPage] = useState(1);
 
@@ -145,21 +155,23 @@ export default function AdminSurveyInviteManager() {
   const [emailSubject, setEmailSubject] = useState('Lời mời tham gia khảo sát');
   const [emailHtml, setEmailHtml] = useState(
     `
-    <p>Chào {{full_name}},</p>
-    <p>Anh/Chị được mời tham gia khảo sát cho các nội dung sau:</p>
-    {{project_list}}
-    <p>{{open_button}}</p>
-  `.trim()
+<p>Chào {{full_name}},</p>
+<p>Anh/Chị được mời tham gia khảo sát cho các nội dung sau:</p>
+{{project_list}}
+<p>{{open_button}}</p>
+`.trim()
   );
 
-  // Tiến độ
+  // progress
   const [progress, setProgress] = useState<ProgressRow[]>([]);
+  const [filterProject, setFilterProject] = useState('');
+  const [filterStatus, setFilterStatus] = useState('');
   const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState('');
   const [emailStats, setEmailStats] = useState<Record<string, string | null>>({});
   const [emailReloadTick, setEmailReloadTick] = useState(0);
 
-  // ===== Helper: load tất cả profiles theo trang =====
+  // ===== Helper: load profiles =====
   async function fetchAllProfiles(): Promise<Profile[]> {
     const PAGE = 1000;
     let from = 0;
@@ -186,7 +198,7 @@ export default function AdminSurveyInviteManager() {
     return all;
   }
 
-  // ===== LOAD DATA =====
+  // ===== LOAD BASE DATA =====
   useEffect(() => {
     (async () => {
       const [pr, rd] = await Promise.all([
@@ -197,53 +209,41 @@ export default function AdminSurveyInviteManager() {
       setRounds((rd.data as Round[]) || []);
 
       const allProfiles = await fetchAllProfiles();
-      setProfiles(allProfiles);
+      // ép role về AppRole nếu dữ liệu lạ
+      const cleaned = allProfiles
+        .map((p) => ({ ...p, role: isAppRole(p.role) ? p.role : 'viewer' }))
+        .sort((a, b) => a.email.localeCompare(b.email));
+      setProfiles(cleaned);
     })();
   }, []);
-
-  // ===== PROGRESS =====
-  async function reloadProgress() {
-    // Nếu chưa chọn filter nào → không load, chỉ clear
-    if (!filterProject && !filterStatus) {
-      setProgress([]);
-      return;
-    }
-
-    const params = new URLSearchParams();
-    if (filterProject) params.set('project_id', filterProject);
-    if (filterStatus) params.set('status', filterStatus);
-
-    const r = await fetch('/api/surveys/progress?' + params.toString());
-    const d = await r.json();
-    setProgress(d.items || []);
-  }
-
-  useEffect(() => {
-    reloadProgress();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filterProject, filterStatus]);
 
   // ===== DERIVED =====
   const roundsByProject = useMemo(() => {
     const m: Record<string, Round[]> = {};
-    rounds.forEach((r) => {
-      (m[r.project_id] ||= []).push(r);
-    });
+    rounds.forEach((r) => ((m[r.project_id] ||= []).push(r)));
     Object.values(m).forEach((list) => list.sort((a, b) => a.round_number - b.round_number));
     return m;
   }, [rounds]);
 
   const activeProjects = useMemo(() => projects.filter((p) => p.status === ACTIVE_STATUS), [projects]);
 
+  const cohortOptions = useMemo(() => {
+    const set = new Set<string>();
+    profiles.forEach((p) => {
+      const v = (p.cohort_code || '').trim();
+      if (v) set.add(v);
+    });
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [profiles]);
+
   function toggleRound(id: string) {
     setSelectedRoundIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
   }
 
-  // Lọc cơ bản (không dùng emailStats)
   const baseProfiles = useMemo(() => {
     const k = q.trim().toLowerCase();
     return profiles.filter((p) => {
-      if (filterRole && p.role !== filterRole) return false;
+      if (filterRole !== 'all' && p.role !== filterRole) return false;
 
       if (filterCohort) {
         const cc = (p.cohort_code || '').trim();
@@ -254,53 +254,36 @@ export default function AdminSurveyInviteManager() {
         }
       }
 
-      const hit = !k || p.email.toLowerCase().includes(k) || (p.name || '').toLowerCase().includes(k);
+      const hit =
+        !k ||
+        p.email.toLowerCase().includes(k) ||
+        (p.name || '').toLowerCase().includes(k);
       return hit;
     });
   }, [profiles, q, filterRole, filterCohort]);
 
-  // Lọc theo đối tượng
-  const cohortOptions = useMemo(() => {
-    const set = new Set<string>();
-    profiles.forEach((p) => {
-      const v = (p.cohort_code || '').trim();
-      if (v) set.add(v);
-    });
-    return Array.from(set).sort((a, b) => a.localeCompare(b));
-  }, [profiles]);
-
-  // Lọc tiếp theo “độ tuổi” email gửi lần cuối (7 ngày)
   const filteredProfiles = useMemo(() => {
     if (!filterEmailAge || selectedRoundIds.length === 0) return baseProfiles;
 
     const now = new Date();
-
     return baseProfiles.filter((p) => {
       const last = emailStats[p.id]; // string | null | undefined
 
-      if (filterEmailAge === 'never') {
-        return !last;
-      }
-
+      if (filterEmailAge === 'never') return !last;
       if (!last) return false;
 
       const lastDate = new Date(last);
       if (Number.isNaN(lastDate.getTime())) return false;
 
-      const diffMs = now.getTime() - lastDate.getTime();
-      const diffDays = diffMs / (1000 * 60 * 60 * 24);
-
+      const diffDays = (now.getTime() - lastDate.getTime()) / (1000 * 60 * 60 * 24);
       if (filterEmailAge === 'recent_7') return diffDays <= 7;
       if (filterEmailAge === 'older_7') return diffDays > 7;
-
       return true;
     });
   }, [baseProfiles, filterEmailAge, selectedRoundIds, emailStats]);
 
-  // Reset page về 1 khi đổi bộ lọc / từ khoá
-  useEffect(() => {
-    setPage(1);
-  }, [q, filterRole, filterEmailAge, filterCohort, selectedRoundIds]);
+  // Reset page when filters change
+  useEffect(() => setPage(1), [q, filterRole, filterEmailAge, filterCohort, selectedRoundIds]);
 
   const totalPages = useMemo(
     () => Math.max(1, Math.ceil(filteredProfiles.length / PAGE_SIZE_PROFILES)),
@@ -313,30 +296,16 @@ export default function AdminSurveyInviteManager() {
     return filteredProfiles.slice(start, start + PAGE_SIZE_PROFILES);
   }, [filteredProfiles, page, totalPages]);
 
-  // đảm bảo page không vượt totalPages khi data giảm
   useEffect(() => {
     if (page > totalPages) setPage(totalPages);
   }, [page, totalPages]);
 
-  const checkedIds = useMemo(() => Object.keys(checkedProfiles).filter((id) => checkedProfiles[id]), [checkedProfiles]);
+  const checkedIds = useMemo(
+    () => Object.keys(checkedProfiles).filter((id) => checkedProfiles[id]),
+    [checkedProfiles]
+  );
 
-  // ✅ NEW: helper lấy role sẽ gán cho 1 profile (override -> default)
-  function getInviteRoleForProfile(profileId: string): InviteRole {
-    return inviteRoleByProfile[profileId] || inviteRoleDefault;
-  }
-
-  // ✅ NEW: áp role default cho TẤT CẢ người đang được check (1 click)
-  function applyDefaultRoleToChecked() {
-    setInviteRoleByProfile((prev) => {
-      const next = { ...prev };
-      checkedIds.forEach((id) => {
-        next[id] = inviteRoleDefault;
-      });
-      return next;
-    });
-  }
-
-  // ===== EMAIL STATS (đã gửi email chưa cho các vòng đang chọn) =====
+  // ===== Email stats =====
   useEffect(() => {
     if (selectedRoundIds.length === 0 || baseProfiles.length === 0) {
       setEmailStats({});
@@ -365,14 +334,13 @@ export default function AdminSurveyInviteManager() {
     })();
   }, [baseProfiles, selectedRoundIds, emailReloadTick]);
 
-  // ===== CSV upload → server bulk-upsert =====
+  // ===== CSV upload =====
   async function onUploadCsv(file: File) {
     setLoading(true);
     setMsg('Đang xử lý CSV...');
     try {
       const csvText = await file.text();
       const parsedRows = parseCsvToObjects(csvText);
-
       const rows = parsedRows
         .map((r) => {
           const full_name = String(r['full_name'] ?? r['name'] ?? '').trim();
@@ -381,10 +349,6 @@ export default function AdminSurveyInviteManager() {
           const title = (r['title'] ?? '').trim();
           const phone = (r['phone'] ?? '').trim();
           const cohort_code = String(r['cohort_code'] ?? '').trim();
-
-          // (tuỳ chọn) CSV có thể có cột role = core_expert/external_expert
-          const roleCsv = normalizeInviteRole(r['role']);
-          // roleCsv chỉ dùng để “gợi ý” cho UI mapping, KHÔNG update DB ở đây (update DB sẽ nằm trong invite)
           return {
             full_name,
             email,
@@ -392,21 +356,18 @@ export default function AdminSurveyInviteManager() {
             title: title || null,
             phone: phone || null,
             cohort_code: cohort_code || null,
-            roleCsv, // chỉ dùng UI
           };
         })
         .filter((r) => r.full_name && r.email);
 
       if (rows.length === 0) {
-        throw new Error('Không tìm thấy dòng hợp lệ. Yêu cầu header: full_name,email (có thể kèm org,title,phone,cohort_code,role).');
+        throw new Error('Không tìm thấy dòng hợp lệ. Header tối thiểu: full_name,email');
       }
 
       const res = await fetch('/api/experts/bulk-upsert', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          experts: rows.map(({ roleCsv, ...rest }) => rest),
-        }),
+        body: JSON.stringify({ experts: rows }),
       });
       const d = await res.json();
       if (d.error) throw new Error(d.error);
@@ -418,25 +379,10 @@ export default function AdminSurveyInviteManager() {
       );
 
       const allProfiles = await fetchAllProfiles();
-      setProfiles(allProfiles);
-
-      // Nếu CSV có role, thì gợi ý set override trong UI theo email match
-      // (match theo email sau khi reload profiles)
-      setInviteRoleByProfile((prev) => {
-        const next = { ...prev };
-        // build map email->roleCsv
-        const roleByEmail = new Map<string, InviteRole>();
-        rows.forEach((r) => {
-          if (r.roleCsv) roleByEmail.set(r.email, r.roleCsv);
-        });
-        if (roleByEmail.size === 0) return prev;
-
-        allProfiles.forEach((p) => {
-          const rr = roleByEmail.get(p.email.toLowerCase());
-          if (rr) next[p.id] = rr;
-        });
-        return next;
-      });
+      const cleaned = allProfiles
+        .map((p) => ({ ...p, role: isAppRole(p.role) ? p.role : 'viewer' }))
+        .sort((a, b) => a.email.localeCompare(b.email));
+      setProfiles(cleaned);
     } catch (e: any) {
       setMsg('❌ Lỗi CSV: ' + (e?.message || String(e)));
     } finally {
@@ -444,47 +390,93 @@ export default function AdminSurveyInviteManager() {
     }
   }
 
-  // ===== ACTIONS (chỉ tác động trang hiện tại) =====
-  function selectAllFiltered() {
+  // ===== ACTIONS selection (trang này) =====
+  function selectAllPage() {
     const next: Record<string, boolean> = { ...checkedProfiles };
-    pageItems.forEach((u) => {
-      next[u.id] = true;
-    });
+    pageItems.forEach((u) => (next[u.id] = true));
+    setCheckedProfiles(next);
+  }
+  function clearPage() {
+    const next: Record<string, boolean> = { ...checkedProfiles };
+    pageItems.forEach((u) => delete next[u.id]);
+    setCheckedProfiles(next);
+  }
+  function invertPage() {
+    const next: Record<string, boolean> = { ...checkedProfiles };
+    pageItems.forEach((u) => (next[u.id] = !next[u.id]));
     setCheckedProfiles(next);
   }
 
-  function clearSelection() {
-    const next: Record<string, boolean> = { ...checkedProfiles };
-    pageItems.forEach((u) => {
-      delete next[u.id];
-    });
-    setCheckedProfiles(next);
+  // ===== PROGRESS =====
+  async function reloadProgress() {
+    if (!filterProject && !filterStatus) {
+      setProgress([]);
+      return;
+    }
+
+    const params = new URLSearchParams();
+    if (filterProject) params.set('project_id', filterProject);
+    if (filterStatus) params.set('status', filterStatus);
+
+    const r = await fetch('/api/surveys/progress?' + params.toString());
+    const d = await r.json();
+    setProgress(d.items || []);
   }
 
-  function invertSelection() {
-    const next: Record<string, boolean> = { ...checkedProfiles };
-    pageItems.forEach((u) => {
-      next[u.id] = !next[u.id];
-    });
-    setCheckedProfiles(next);
-  }
+  useEffect(() => {
+    reloadProgress();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filterProject, filterStatus]);
 
+  // ===== PREVIEW email =====
+  const previewHtml = useMemo(() => {
+    const sampleFullName = 'Nguyễn Văn A';
+    const sampleEmail = 'vana@example.com';
+
+    const roundsInfo = selectedRoundIds.map((rid) => {
+      const r = rounds.find((x) => x.id === rid);
+      const pj = projects.find((p) => p.id === r?.project_id);
+      return { project_title: pj?.title || '', round_label: r ? `V${r.round_number}` : '' };
+    });
+
+    const ul = `<ul>${roundsInfo
+      .map((r) => `<li>${r.project_title} – ${r.round_label}</li>`)
+      .join('')}</ul>`;
+
+    let html = emailHtml
+      .replace(/{{\s*full_name\s*}}/gi, sampleFullName)
+      .replace(/{{\s*email\s*}}/gi, sampleEmail)
+      .replace(/{{\s*project_list\s*}}/gi, ul)
+      .replace(
+        /{{\s*open_button\s*}}/gi,
+        `<a href="${process.env.NEXT_PUBLIC_BASE_URL || ''}" style="display:inline-block;padding:10px 16px;border-radius:8px;background:#2563eb;color:#fff;text-decoration:none">Mở trang khảo sát</a>`
+      );
+
+    if (!/{{\s*open_button\s*}}/i.test(emailHtml)) {
+      html += `<div style="margin-top:12px"><a href="${
+        process.env.NEXT_PUBLIC_BASE_URL || ''
+      }" style="display:inline-block;padding:10px 16px;border-radius:8px;background:#2563eb;color:#fff;text-decoration:none">Mở trang khảo sát</a></div>`;
+    }
+    if (!/{{\s*project_list\s*}}/i.test(emailHtml)) {
+      html += `<div style="margin-top:12px">${ul}</div>`;
+    }
+
+    html += `<hr style="margin:24px 0"/><div style="font-size:12px;color:#6b7280">Khoa Y học cổ truyền - Đại học Y Dược Thành phố Hồ Chí Minh.</div>`;
+    return html;
+  }, [emailHtml, selectedRoundIds, rounds, projects]);
+
+  // ===== ACT: invite/remind =====
   async function act(mode: 'invite' | 'remind') {
-    if (checkedIds.length === 0) {
-      alert('Chọn ít nhất 1 người');
-      return;
-    }
-    if (selectedRoundIds.length === 0) {
-      alert('Chọn ít nhất 1 vòng');
-      return;
-    }
+    if (checkedIds.length === 0) return alert('Chọn ít nhất 1 người');
+    if (selectedRoundIds.length === 0) return alert('Chọn ít nhất 1 vòng');
+
     setLoading(true);
     try {
-      // ✅ NEW: gửi mapping role theo profile_ids (chỉ meaningful khi mode=invite)
-      const invite_roles: Record<string, InviteRole> = {};
-      checkedIds.forEach((id) => {
-        invite_roles[id] = getInviteRoleForProfile(id);
-      });
+      // build invite_roles only for checked profiles (role override or default)
+      const invite_roles: Record<string, AppRole> = {};
+      for (const pid of checkedIds) {
+        invite_roles[pid] = inviteRoleMap[pid] || defaultInviteRole;
+      }
 
       const r = await fetch('/api/invitations/send', {
         method: 'POST',
@@ -494,24 +486,21 @@ export default function AdminSurveyInviteManager() {
           round_ids: selectedRoundIds,
           mode,
           email: { subject: emailSubject, html: emailHtml },
-          // ✅ NEW payload
-          invite_roles: mode === 'invite' ? invite_roles : undefined,
-          default_invite_role: mode === 'invite' ? inviteRoleDefault : undefined,
+
+          // ✅ NEW payload: only meaningful for invite
+          default_invite_role: defaultInviteRole,
+          invite_roles,
         }),
       });
+
       const d = await r.json();
       if (d.error) throw new Error(d.error);
 
       const ok = d.results?.filter((x: any) => x.ok).length || 0;
-      setMsg(`Đã gửi ${ok}/${d.results?.length || 0} email.`);
-
+      setMsg(`✅ Đã gửi ${ok}/${d.results?.length || 0} email.`);
       setCheckedProfiles({});
       await reloadProgress();
       setEmailReloadTick((t) => t + 1);
-
-      // reload profiles để nhìn thấy role mới (nếu API có update role)
-      const allProfiles = await fetchAllProfiles();
-      setProfiles(allProfiles);
     } catch (e: any) {
       setMsg('❌ Lỗi gửi email: ' + (e?.message || String(e)));
     } finally {
@@ -519,389 +508,405 @@ export default function AdminSurveyInviteManager() {
     }
   }
 
-  // ===== PREVIEW =====
-  const previewHtml = useMemo(() => {
-    const sample = {
-      raw: emailHtml,
-      fullName: 'Nguyễn Văn A',
-      email: 'vana@example.com',
-      rounds: selectedRoundIds.map((rid) => {
-        const r = rounds.find((x) => x.id === rid);
-        const pj = projects.find((p) => p.id === r?.project_id);
-        return { project_title: pj?.title || '', round_label: r ? `V${r.round_number}` : '' };
-      }),
-    };
+  // ===== UI helpers =====
+  function roleLabel(role: AppRole) {
+    return ROLE_OPTIONS.find((x) => x.value === role)?.label || role;
+  }
 
-    const ul =
-      `<ul>` + sample.rounds.map((r) => `<li>${r.project_title} – ${r.round_label}</li>`).join('') + `</ul>`;
-
-    let html = sample.raw
-      .replace(/{{\s*full_name\s*}}/gi, sample.fullName)
-      .replace(/{{\s*email\s*}}/gi, sample.email)
-      .replace(/{{\s*project_list\s*}}/gi, ul)
-      .replace(
-        /{{\s*open_button\s*}}/gi,
-        `<a href="${process.env.NEXT_PUBLIC_BASE_URL || ''}" style="display:inline-block;padding:10px 16px;border-radius:8px;background:#2563eb;color:#fff;text-decoration:none">Mở trang khảo sát</a>`
-      );
-
-    if (!/{{\s*open_button\s*}}/i.test(sample.raw))
-      html += `<div style="margin-top:12px"><a href="${
-        process.env.NEXT_PUBLIC_BASE_URL || ''
-      }" style="display:inline-block;padding:10px 16px;border-radius:8px;background:#2563eb;color:#fff;text-decoration:none">Mở trang khảo sát</a></div>`;
-
-    if (!/{{\s*project_list\s*}}/i.test(sample.raw)) html += `<div style="margin-top:12px">${ul}</div>`;
-
-    html += `<hr style="margin:24px 0"/><div style="font-size:12px;color:#6b7280">Khoa Y học cổ truyền - Đại học Y Dược Thành phố Hồ Chí Minh.</div>`;
-    return html;
-  }, [emailHtml, selectedRoundIds, rounds, projects]);
-
-  // ===== RENDER =====
   return (
-    <div className="space-y-8">
-      <h1 className="text-2xl font-bold">✉️ Mời khảo sát</h1>
-      {msg && <div className="p-3 rounded bg-indigo-50 text-indigo-700">{msg}</div>}
-
-      {/* 1) CSV */}
-      <div className="space-y-2">
-        <div className="font-semibold">1) Nạp danh bạ từ CSV</div>
-        <input
-          type="file"
-          accept=".csv"
-          onChange={(e) => {
-            const f = e.target.files?.[0];
-            if (f) onUploadCsv(f);
-          }}
-        />
-        <div className="text-xs text-slate-600">
-          CSV header tối thiểu: <code>full_name,email</code> (có thể kèm <code>org,title,phone,cohort_code,role</code>).
+    <div className="space-y-6">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold">✉️ Mời khảo sát</h1>
+          <div className={UI.muted}>
+            Chọn vòng → chọn người → (chọn role khi mời) → soạn email → gửi.
+          </div>
         </div>
       </div>
 
-      {/* 2) Chọn rounds: chỉ project đang hoạt động */}
-      <div className="space-y-2">
-        <div className="font-semibold">2) Chọn vòng khảo sát (chỉ Project đang hoạt động)</div>
-        <div className="grid md:grid-cols-2 gap-4">
-          {activeProjects.map((p) => (
-            <div key={p.id} className="border rounded-lg p-3">
-              <div className="font-semibold mb-2">{p.title}</div>
-              <div className="flex flex-wrap gap-2">
-                {(roundsByProject[p.id] || []).map((r) => (
-                  <label
-                    key={r.id}
-                    className={`inline-flex items-center gap-2 px-2 py-1 rounded border cursor-pointer ${
-                      selectedRoundIds.includes(r.id) ? 'bg-blue-50 border-blue-300' : 'bg-white'
-                    }`}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={selectedRoundIds.includes(r.id)}
-                      onChange={() => toggleRound(r.id)}
-                    />{' '}
-                    V{r.round_number}
-                  </label>
-                ))}
-                {(roundsByProject[p.id] || []).length === 0 && (
-                  <div className="text-slate-400 text-sm">(Chưa có vòng)</div>
-                )}
+      {msg && <div className="p-3 rounded-lg bg-indigo-50 text-indigo-700">{msg}</div>}
+
+      {/* GRID: left main + right email */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* LEFT 2 cols */}
+        <div className="lg:col-span-2 space-y-6">
+          {/* 1) CSV */}
+          <div className={UI.card}>
+            <div className={UI.title}>1) Nạp danh bạ từ CSV</div>
+            <div className="mt-3 flex flex-col sm:flex-row sm:items-center gap-3">
+              <input
+                type="file"
+                accept=".csv"
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) onUploadCsv(f);
+                }}
+              />
+              <div className={UI.muted}>
+                Header tối thiểu: <code>full_name,email</code> (có thể kèm <code>org,title,phone,cohort_code</code>)
               </div>
             </div>
-          ))}
-          {activeProjects.length === 0 && <div className="text-slate-500">Không có project đang hoạt động.</div>}
-        </div>
-      </div>
-
-      {/* 3) Chọn người tham gia */}
-      <div className="space-y-3">
-        <div className="font-semibold">3) Chọn người tham gia khảo sát</div>
-
-        <div className="flex flex-wrap gap-3 items-center">
-          <input
-            className={INPUT + ' md:w-64'}
-            placeholder="Tìm theo tên/email"
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-          />
-
-          <select className={INPUT + ' md:w-56'} value={filterRole} onChange={(e) => setFilterRole(e.target.value as any)}>
-            <option value="">— Tất cả vai trò —</option>
-            <option value="core_expert">Chuyên gia nòng cốt</option>
-            <option value="external_expert">Chuyên gia bên ngoài</option>
-          </select>
-
-          <select className={INPUT + ' md:w-56'} value={filterCohort} onChange={(e) => setFilterCohort(e.target.value)}>
-            <option value="">— Tất cả đối tượng —</option>
-            <option value="__NULL__">(Chưa gán đối tượng)</option>
-            {cohortOptions.map((c) => (
-              <option key={c} value={c}>
-                {c}
-              </option>
-            ))}
-          </select>
-
-          <select
-            className={INPUT + ' md:w-64'}
-            value={filterEmailAge}
-            onChange={(e) => setFilterEmailAge(e.target.value as any)}
-            disabled={selectedRoundIds.length === 0}
-          >
-            <option value="">— Lọc theo lần gửi email —</option>
-            <option value="never">Chưa từng gửi (cho các vòng đã chọn)</option>
-            <option value="recent_7">Đã gửi trong 7 ngày gần đây</option>
-            <option value="older_7">Đã gửi cách đây &gt; 7 ngày</option>
-          </select>
-
-          {/* ✅ NEW: role khi mời */}
-          <div className="flex items-center gap-2">
-            <span className="text-sm text-slate-600">Vai trò khi mời:</span>
-            <select
-              className={INPUT + ' md:w-56'}
-              value={inviteRoleDefault}
-              onChange={(e) => setInviteRoleDefault(e.target.value as InviteRole)}
-            >
-              <option value="external_expert">Chuyên gia bên ngoài</option>
-              <option value="core_expert">Chuyên gia nòng cốt</option>
-            </select>
-
-            <button
-              className={BTN2}
-              type="button"
-              onClick={applyDefaultRoleToChecked}
-              disabled={checkedIds.length === 0}
-              title="Gán vai trò mặc định cho toàn bộ người đang được chọn (override)"
-            >
-              Áp role cho người đã chọn
-            </button>
           </div>
 
-          <div className="flex items-center gap-2">
-            <button className={BTN2} onClick={selectAllFiltered} type="button">
-              Chọn tất cả (trang này)
-            </button>
-            <button className={BTN2} onClick={invertSelection} type="button">
-              Đảo chọn (trang này)
-            </button>
-            <button className={BTN2} onClick={clearSelection} type="button">
-              Bỏ chọn (trang này)
-            </button>
+          {/* 2) Chọn rounds */}
+          <div className={UI.card}>
+            <div className={UI.title}>2) Chọn vòng khảo sát</div>
+            <div className={UI.muted}>Chỉ hiển thị Project đang ở trạng thái “{ACTIVE_STATUS}”.</div>
 
-            <span className="text-sm text-slate-600">
-              Đã chọn: <b>{checkedIds.length}</b> / {filteredProfiles.length}{' '}
-              <span className="text-slate-400">
-                (Trang {page}/{totalPages}, hiển thị {pageItems.length}/{PAGE_SIZE_PROFILES})
-              </span>
-            </span>
-          </div>
-        </div>
-
-        {/* Pagination bar */}
-        <div className="flex items-center gap-2">
-          <button className={BTN2} onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page <= 1} type="button">
-            ← Trang trước
-          </button>
-
-          <div className="text-sm text-slate-600">
-            Trang <b>{page}</b> / {totalPages}
-          </div>
-
-          <button
-            className={BTN2}
-            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-            disabled={page >= totalPages}
-            type="button"
-          >
-            Trang sau →
-          </button>
-
-          <div className="ml-auto flex items-center gap-2 whitespace-nowrap">
-            <span className="text-sm text-slate-500 shrink-0 whitespace-nowrap">Đi tới:</span>
-            <input
-              className={INPUT + ' w-24'}
-              type="number"
-              min={1}
-              max={totalPages}
-              value={page}
-              onChange={(e) => setPage(Number(e.target.value) || 1)}
-            />
-          </div>
-        </div>
-
-        <div className="border rounded max-h-80 overflow-auto">
-          {pageItems.map((u) => {
-            const lastSent = selectedRoundIds.length ? emailStats[u.id] : null;
-            const inviteRole = getInviteRoleForProfile(u.id);
-
-            return (
-              <label key={u.id} className="flex items-start gap-2 px-3 py-2 border-b last:border-b-0">
-                <input
-                  type="checkbox"
-                  checked={!!checkedProfiles[u.id]}
-                  onChange={(e) =>
-                    setCheckedProfiles((prev) => ({
-                      ...prev,
-                      [u.id]: e.target.checked,
-                    }))
-                  }
-                  className="mt-1"
-                />
-
-                <div className="flex-1 flex flex-col text-sm">
-                  <span>
-                    <b>{u.name || u.email}</b>{' '}
-                    <span className="text-slate-500">
-                      ({u.email}) – <i>role hiện tại: {u.role}</i>
-                      {u.cohort_code ? <> – <b>{u.cohort_code}</b></> : null}
-                    </span>
-                  </span>
-
-                  {/* ✅ NEW: chọn role khi mời cho từng người */}
-                  <div className="mt-1 flex flex-wrap items-center gap-2 text-xs">
-                    <span className="text-slate-500">Role sẽ gán khi mời:</span>
-                    <select
-                      className="border rounded px-2 py-1"
-                      value={inviteRole}
-                      onChange={(e) => {
-                        const v = e.target.value as InviteRole;
-                        setInviteRoleByProfile((prev) => ({ ...prev, [u.id]: v }));
-                      }}
-                      disabled={!checkedProfiles[u.id]} // chỉ cho đổi khi đã check
-                      title="Chỉ áp dụng khi bạn bấm Mời (invite). Nhắc (remind) sẽ không đổi role."
-                    >
-                      <option value="external_expert">external_expert</option>
-                      <option value="core_expert">core_expert</option>
-                    </select>
-
-                    {checkedProfiles[u.id] && inviteRoleByProfile[u.id] && (
-                      <button
-                        type="button"
-                        className="text-slate-500 underline"
-                        onClick={() =>
-                          setInviteRoleByProfile((prev) => {
-                            const next = { ...prev };
-                            delete next[u.id];
-                            return next;
-                          })
-                        }
+            <div className="mt-4 grid md:grid-cols-2 gap-4">
+              {activeProjects.map((p) => (
+                <div key={p.id} className="border rounded-lg p-3">
+                  <div className="font-semibold mb-2">{p.title}</div>
+                  <div className="flex flex-wrap gap-2">
+                    {(roundsByProject[p.id] || []).map((r) => (
+                      <label
+                        key={r.id}
+                        className={`inline-flex items-center gap-2 px-2 py-1 rounded border cursor-pointer ${
+                          selectedRoundIds.includes(r.id) ? 'bg-blue-50 border-blue-300' : 'bg-white'
+                        }`}
                       >
-                        bỏ override
-                      </button>
+                        <input
+                          type="checkbox"
+                          checked={selectedRoundIds.includes(r.id)}
+                          onChange={() => toggleRound(r.id)}
+                        />
+                        V{r.round_number}
+                      </label>
+                    ))}
+                    {(roundsByProject[p.id] || []).length === 0 && (
+                      <div className="text-slate-400 text-sm">(Chưa có vòng)</div>
                     )}
                   </div>
-
-                  {selectedRoundIds.length === 0 ? (
-                    <span className="text-xs text-slate-400">Chọn vòng ở bước 2 để xem trạng thái email.</span>
-                  ) : lastSent ? (
-                    <span className="text-xs text-emerald-700">
-                      Đã gửi email (cho ít nhất 1 vòng đã chọn) lần cuối: {new Date(lastSent).toLocaleString()}
-                    </span>
-                  ) : (
-                    <span className="text-xs text-slate-500">Chưa gửi email cho các vòng đã chọn.</span>
-                  )}
                 </div>
-              </label>
-            );
-          })}
-
-          {filteredProfiles.length === 0 && (
-            <div className="p-3 text-slate-500 text-sm">Không có người phù hợp bộ lọc.</div>
-          )}
-        </div>
-      </div>
-
-      {/* 4) Soạn email */}
-      <div className="space-y-2">
-        <div className="font-semibold">4) Soạn email</div>
-        <label className="block text-sm">Tiêu đề</label>
-        <input className={INPUT} value={emailSubject} onChange={(e) => setEmailSubject(e.target.value)} />
-        <label className="block text-sm">
-          Nội dung HTML (hỗ trợ biến: <code>{'{{full_name}}'}</code>, <code>{'{{email}}'}</code>,{' '}
-          <code>{'{{project_list}}'}</code>, <code>{'{{open_button}}'}</code>)
-        </label>
-        <textarea className={INPUT + ' h-48 font-mono'} value={emailHtml} onChange={(e) => setEmailHtml(e.target.value)} />
-      </div>
-
-      {/* 5) Preview */}
-      <div className="space-y-2">
-        <div className="font-semibold">5) Preview email</div>
-        <div className="border rounded p-3">
-          <div className="prose max-w-none" dangerouslySetInnerHTML={{ __html: previewHtml }} />
-        </div>
-      </div>
-
-      {/* 6) Hành động */}
-      <div className="flex items-center gap-3">
-        <button className={BTN} disabled={loading} onClick={() => act('invite')} type="button">
-          Mời (add + gửi)
-        </button>
-        <button className={BTN2} disabled={loading} onClick={() => act('remind')} type="button">
-          Nhắc (chỉ gửi)
-        </button>
-      </div>
-
-      {/* 7) Tiến độ */}
-      <div className="space-y-2">
-        <div className="font-semibold">7) Tiến độ tham gia</div>
-        <div className="flex flex-wrap items-center gap-3">
-          <select className={INPUT + ' md:w-64'} value={filterProject} onChange={(e) => setFilterProject(e.target.value)}>
-            <option value="">— Lọc theo Project —</option>
-            {projects.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.title}
-              </option>
-            ))}
-          </select>
-          <select className={INPUT + ' md:w-48'} value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}>
-            <option value="">— Tất cả trạng thái —</option>
-            <option value="submitted">Đã nộp</option>
-            <option value="invited">Chưa nộp</option>
-          </select>
-          <button className={BTN2} onClick={reloadProgress} type="button">
-            Làm mới
-          </button>
-        </div>
-
-        <div className="border rounded max-h-96 overflow-auto">
-          <table className="min-w-full text-sm">
-            <thead className="bg-slate-50">
-              <tr>
-                <th className="p-2 text-left">Người tham gia</th>
-                <th className="p-2">Project</th>
-                <th className="p-2">Vòng</th>
-                <th className="p-2">Trạng thái</th>
-                <th className="p-2">Mời lúc</th>
-                <th className="p-2">Đã nộp</th>
-              </tr>
-            </thead>
-            <tbody>
-              {progress.map((r, i) => (
-                <tr key={i} className="border-t">
-                  <td className="p-2 text-left">
-                    {r.user_name} <span className="text-slate-500">({r.email})</span>
-                  </td>
-                  <td className="p-2 text-center">{r.project_title}</td>
-                  <td className="p-2 text-center">{r.round_label}</td>
-                  <td className="p-2 text-center">
-                    {r.status === 'submitted' ? (
-                      <span className="px-2 py-1 rounded bg-green-100 text-green-700">Đã nộp</span>
-                    ) : (
-                      <span className="px-2 py-1 rounded bg-yellow-100 text-yellow-700">Chưa nộp</span>
-                    )}
-                  </td>
-                  <td className="p-2 text-center">{r.invited_at ? new Date(r.invited_at).toLocaleString() : '—'}</td>
-                  <td className="p-2 text-center">{r.responded_at ? new Date(r.responded_at).toLocaleString() : '—'}</td>
-                </tr>
               ))}
+              {activeProjects.length === 0 && <div className="text-slate-500">Không có project đang hoạt động.</div>}
+            </div>
 
-              {progress.length === 0 && (
-                <tr>
-                  <td colSpan={6} className="p-4 text-center text-slate-500">
-                    {!filterProject && !filterStatus
-                      ? 'Chọn Project hoặc Trạng thái để xem tiến độ.'
-                      : 'Không có dữ liệu cho bộ lọc hiện tại.'}
-                  </td>
-                </tr>
+            <div className="mt-3 text-sm text-slate-600">
+              Đã chọn <b>{selectedRoundIds.length}</b> vòng.
+            </div>
+          </div>
+
+          {/* 3) Chọn người + Role khi mời */}
+          <div className={UI.card}>
+            <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-3">
+              <div>
+                <div className={UI.title}>3) Chọn người tham gia</div>
+                <div className={UI.muted}>
+                  Bạn có thể lọc theo role/đối tượng, và chọn role để gán khi mời.
+                </div>
+              </div>
+
+              {/* Default invite role */}
+              <div className="w-full md:w-72">
+                <label className="block text-sm font-semibold mb-1">Role sẽ gán khi mời (mặc định)</label>
+                <select
+                  className={UI.select}
+                  value={defaultInviteRole}
+                  onChange={(e) => setDefaultInviteRole(e.target.value as AppRole)}
+                >
+                  {ROLE_OPTIONS.map((r) => (
+                    <option key={r.value} value={r.value}>
+                      {r.label} ({r.value})
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {/* Filters */}
+            <div className="mt-4 grid grid-cols-1 md:grid-cols-4 gap-3">
+              <div className="md:col-span-2">
+                <label className="block text-sm font-semibold mb-1">Tìm theo tên/email</label>
+                <input className={UI.input} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Nhập từ khoá..." />
+              </div>
+
+              <div>
+                <label className="block text-sm font-semibold mb-1">Lọc role (hiện có)</label>
+                <select className={UI.select} value={filterRole} onChange={(e) => setFilterRole(e.target.value as any)}>
+                  <option value="all">— Tất cả —</option>
+                  {ROLE_OPTIONS.map((r) => (
+                    <option key={r.value} value={r.value}>
+                      {r.label} ({r.value})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-semibold mb-1">Đối tượng (cohort)</label>
+                <select className={UI.select} value={filterCohort} onChange={(e) => setFilterCohort(e.target.value)}>
+                  <option value="">— Tất cả —</option>
+                  <option value="__NULL__">(Chưa gán đối tượng)</option>
+                  {cohortOptions.map((c) => (
+                    <option key={c} value={c}>
+                      {c}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="md:col-span-2">
+                <label className="block text-sm font-semibold mb-1">Lọc theo lần gửi email (cho các vòng đã chọn)</label>
+                <select
+                  className={UI.select}
+                  value={filterEmailAge}
+                  onChange={(e) => setFilterEmailAge(e.target.value as any)}
+                  disabled={selectedRoundIds.length === 0}
+                >
+                  <option value="">— Không lọc —</option>
+                  <option value="never">Chưa từng gửi</option>
+                  <option value="recent_7">Đã gửi trong 7 ngày</option>
+                  <option value="older_7">Đã gửi &gt; 7 ngày</option>
+                </select>
+              </div>
+
+              <div className="md:col-span-2 flex items-end justify-between gap-2">
+                <div className="flex gap-2 flex-wrap">
+                  <button className={UI.btn2} onClick={selectAllPage} type="button">
+                    Chọn tất cả (trang)
+                  </button>
+                  <button className={UI.btn2} onClick={invertPage} type="button">
+                    Đảo chọn (trang)
+                  </button>
+                  <button className={UI.btn2} onClick={clearPage} type="button">
+                    Bỏ chọn (trang)
+                  </button>
+                </div>
+                <div className="text-sm text-slate-600">
+                  Đã chọn: <b>{checkedIds.length}</b> / {filteredProfiles.length}
+                </div>
+              </div>
+            </div>
+
+            {/* Pagination */}
+            <div className="mt-3 flex items-center gap-2">
+              <button className={UI.btn2} onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page <= 1} type="button">
+                ← Trước
+              </button>
+              <div className="text-sm text-slate-600">
+                Trang <b>{page}</b> / {totalPages}
+              </div>
+              <button
+                className={UI.btn2}
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                disabled={page >= totalPages}
+                type="button"
+              >
+                Sau →
+              </button>
+              <div className="ml-auto flex items-center gap-2">
+                <span className="text-sm text-slate-500">Đi tới:</span>
+                <input
+                  className={UI.input + ' w-24'}
+                  type="number"
+                  min={1}
+                  max={totalPages}
+                  value={page}
+                  onChange={(e) => setPage(Number(e.target.value) || 1)}
+                />
+              </div>
+            </div>
+
+            {/* List */}
+            <div className="mt-3 border rounded-lg overflow-auto max-h-[520px]">
+              {pageItems.map((u) => {
+                const checked = !!checkedProfiles[u.id];
+                const lastSent = selectedRoundIds.length ? emailStats[u.id] : null;
+                const inviteRole = inviteRoleMap[u.id] || defaultInviteRole;
+
+                return (
+                  <div key={u.id} className="flex flex-col md:flex-row md:items-center gap-3 px-3 py-3 border-b last:border-b-0">
+                    <div className="flex items-start gap-3 flex-1">
+                      <input
+                        type="checkbox"
+                        className="mt-1"
+                        checked={checked}
+                        onChange={(e) =>
+                          setCheckedProfiles((prev) => ({
+                            ...prev,
+                            [u.id]: e.target.checked,
+                          }))
+                        }
+                      />
+
+                      <div className="min-w-0">
+                        <div className="text-sm">
+                          <b>{u.name || u.email}</b>{' '}
+                          <span className="text-slate-500">
+                            ({u.email}) · role hiện tại: <i>{u.role}</i>
+                            {u.cohort_code ? <> · đối tượng: <b>{u.cohort_code}</b></> : null}
+                          </span>
+                        </div>
+
+                        <div className="mt-1 text-xs">
+                          {selectedRoundIds.length === 0 ? (
+                            <span className="text-slate-400">Chọn vòng ở bước 2 để xem trạng thái email.</span>
+                          ) : lastSent ? (
+                            <span className="text-emerald-700">
+                              Đã gửi email lần cuối: {new Date(lastSent).toLocaleString()}
+                            </span>
+                          ) : (
+                            <span className="text-slate-500">Chưa gửi email cho các vòng đã chọn.</span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Role to assign when inviting */}
+                    <div className="w-full md:w-72">
+                      <label className="block text-xs font-semibold text-slate-600 mb-1">
+                        Role sẽ gán khi mời (người này)
+                      </label>
+                      <select
+                        className={UI.select}
+                        value={inviteRole}
+                        onChange={(e) =>
+                          setInviteRoleMap((prev) => ({
+                            ...prev,
+                            [u.id]: e.target.value as AppRole,
+                          }))
+                        }
+                      >
+                        {ROLE_OPTIONS.map((r) => (
+                          <option key={r.value} value={r.value}>
+                            {r.label} ({r.value})
+                          </option>
+                        ))}
+                      </select>
+                      <div className="text-xs text-slate-500 mt-1">
+                        (Mặc định: {roleLabel(defaultInviteRole)} · override: {roleLabel(inviteRole)})
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+
+              {filteredProfiles.length === 0 && (
+                <div className="p-3 text-slate-500 text-sm">Không có người phù hợp bộ lọc.</div>
               )}
-            </tbody>
-          </table>
+            </div>
+
+            {/* Actions */}
+            <div className="mt-4 flex items-center gap-3">
+              <button className={UI.btn} disabled={loading} onClick={() => act('invite')} type="button">
+                Mời (add + gửi)
+              </button>
+              <button className={UI.btn2} disabled={loading} onClick={() => act('remind')} type="button">
+                Nhắc (chỉ gửi)
+              </button>
+              <div className="text-sm text-slate-500">
+                Khi <b>mời</b> sẽ gán role theo lựa chọn; khi <b>nhắc</b> sẽ không đổi role.
+              </div>
+            </div>
+          </div>
+
+          {/* 7) Progress */}
+          <div className={UI.card}>
+            <div className={UI.title}>4) Tiến độ tham gia</div>
+
+            <div className="mt-3 grid grid-cols-1 md:grid-cols-3 gap-3">
+              <div>
+                <label className="block text-sm font-semibold mb-1">Lọc theo Project</label>
+                <select className={UI.select} value={filterProject} onChange={(e) => setFilterProject(e.target.value)}>
+                  <option value="">— Chọn —</option>
+                  {projects.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.title}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-semibold mb-1">Trạng thái</label>
+                <select className={UI.select} value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}>
+                  <option value="">— Tất cả —</option>
+                  <option value="submitted">Đã nộp</option>
+                  <option value="invited">Chưa nộp</option>
+                </select>
+              </div>
+
+              <div className="flex items-end">
+                <button className={UI.btn2} onClick={reloadProgress} type="button">
+                  Làm mới
+                </button>
+              </div>
+            </div>
+
+            <div className="mt-3 border rounded-lg overflow-auto max-h-96">
+              <table className="min-w-full text-sm">
+                <thead className="bg-slate-50 sticky top-0">
+                  <tr>
+                    <th className="p-2 text-left">Người tham gia</th>
+                    <th className="p-2 text-center">Project</th>
+                    <th className="p-2 text-center">Vòng</th>
+                    <th className="p-2 text-center">Trạng thái</th>
+                    <th className="p-2 text-center">Mời lúc</th>
+                    <th className="p-2 text-center">Đã nộp</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {progress.map((r, i) => (
+                    <tr key={i} className="border-t">
+                      <td className="p-2 text-left">
+                        {r.user_name} <span className="text-slate-500">({r.email})</span>
+                      </td>
+                      <td className="p-2 text-center">{r.project_title}</td>
+                      <td className="p-2 text-center">{r.round_label}</td>
+                      <td className="p-2 text-center">
+                        {r.status === 'submitted' ? (
+                          <span className="px-2 py-1 rounded bg-green-100 text-green-700">Đã nộp</span>
+                        ) : (
+                          <span className="px-2 py-1 rounded bg-yellow-100 text-yellow-700">Chưa nộp</span>
+                        )}
+                      </td>
+                      <td className="p-2 text-center">{r.invited_at ? new Date(r.invited_at).toLocaleString() : '—'}</td>
+                      <td className="p-2 text-center">{r.responded_at ? new Date(r.responded_at).toLocaleString() : '—'}</td>
+                    </tr>
+                  ))}
+
+                  {progress.length === 0 && (
+                    <tr>
+                      <td colSpan={6} className="p-4 text-center text-slate-500">
+                        {!filterProject && !filterStatus
+                          ? 'Chọn Project hoặc Trạng thái để xem tiến độ.'
+                          : 'Không có dữ liệu cho bộ lọc hiện tại.'}
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        {/* RIGHT: email */}
+        <div className="space-y-6">
+          <div className={UI.card}>
+            <div className={UI.title}>Email</div>
+
+            <div className="mt-3 space-y-2">
+              <label className="block text-sm font-semibold">Tiêu đề</label>
+              <input className={UI.input} value={emailSubject} onChange={(e) => setEmailSubject(e.target.value)} />
+
+              <label className="block text-sm font-semibold">
+                Nội dung HTML{' '}
+                <span className="text-xs font-normal text-slate-500">
+                  (biến: <code>{'{{full_name}}'}</code>, <code>{'{{email}}'}</code>, <code>{'{{project_list}}'}</code>,{' '}
+                  <code>{'{{open_button}}'}</code>)
+                </span>
+              </label>
+              <textarea className={UI.input + ' h-56 font-mono text-sm'} value={emailHtml} onChange={(e) => setEmailHtml(e.target.value)} />
+            </div>
+          </div>
+
+          <div className={UI.card}>
+            <div className={UI.title}>Preview</div>
+            <div className="mt-3 border rounded-lg p-3">
+              <div className="prose max-w-none" dangerouslySetInnerHTML={{ __html: previewHtml }} />
+            </div>
+          </div>
         </div>
       </div>
     </div>
