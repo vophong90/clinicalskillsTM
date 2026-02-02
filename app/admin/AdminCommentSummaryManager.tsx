@@ -58,6 +58,28 @@ function truncate(text: string, maxWords = 10): string {
   return words.slice(0, maxWords).join(' ') + '…';
 }
 
+async function fetchRoundMeta(roundId: string) {
+  const res = await fetch('/api/admin/comments/raw', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ round_id: roundId, mode: 'meta' }),
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || 'Request failed');
+  }
+
+  return (await res.json()) as {
+    meta?: {
+      cohort_options?: string[];
+      cohort_count_in_project?: number;
+      cohort_count_in_round?: number;
+      participant_count_in_round?: number;
+    };
+  };
+}
+
 export default function AdminCommentSummaryManager() {
   // ===== STATE CHUNG =====
   const [projects, setProjects] = useState<Project[]>([]);
@@ -155,43 +177,52 @@ export default function AdminCommentSummaryManager() {
       );
       setProjects(projList);
 
-      // 3) Map project ↔ cohort thông qua round_participants + profiles
+      // 3) Build project ↔ cohort map bằng API admin (tránh RLS)
       try {
-        // IMPORTANT: tên quan hệ 'profiles' và 'rounds' giả định theo FK mặc định:
-        // round_participants.round_id -> rounds.id
-        // round_participants.user_id -> profiles.id
-        // Nếu schema của anh đặt tên khác, chỉnh lại chuỗi trong select().
-        const { data: rpData, error: rpErr } = await supabase
-          .from('round_participants')
-          .select(
-            `
-            round_id,
-            rounds!inner(project_id),
-            profiles!inner(id, cohort_code)
-          `
-          );
+        // chọn 1 round đại diện cho mỗi project (ưu tiên round_number lớn nhất)
+        const repRoundByProject = new Map<string, Round>();
 
-        if (rpErr) {
-          console.error('Lỗi truy vấn round_participants:', rpErr);
-        } else if (rpData) {
-          const map: Record<string, Set<string>> = {};
-          const cohortSet = new Set<string>();
+        (roundsData || []).forEach((r: any) => {
+          const cur = repRoundByProject.get(r.project_id);
+          if (!cur || (r.round_number ?? 0) > (cur.round_number ?? 0)) {
+            repRoundByProject.set(r.project_id, {
+              id: r.id,
+              project_id: r.project_id,
+              round_number: r.round_number,
+              status: r.status,
+            });
+          }
+        });
 
-          (rpData as any[]).forEach((row) => {
-            const projId = row.rounds?.project_id as string | undefined;
-            const cohort = row.profiles?.cohort_code as string | null | undefined;
-            if (!projId || !cohort) return;
+        const reps = Array.from(repRoundByProject.values());
 
-            cohortSet.add(cohort);
-            if (!map[projId]) map[projId] = new Set<string>();
-            map[projId].add(cohort);
+        const results = await Promise.allSettled(
+          reps.map(async (rr) => {
+            const data = await fetchRoundMeta(rr.id);
+            return { project_id: rr.project_id, meta: data.meta };
+          })
+        );
+
+        const map: Record<string, Set<string>> = {};
+        const cohortSet = new Set<string>();
+
+        results.forEach((r) => {
+          if (r.status !== 'fulfilled') return;
+          const { project_id, meta } = r.value;
+          const opts = meta?.cohort_options || [];
+
+          if (!map[project_id]) map[project_id] = new Set<string>();
+          opts.forEach((c) => {
+            if (!c) return;
+            map[project_id].add(c);
+            cohortSet.add(c);
           });
+        });
 
-          setProjectCohortMap(map);
-          setCohortOptions(Array.from(cohortSet).sort());
-        }
+        setProjectCohortMap(map);
+        setCohortOptions(Array.from(cohortSet).sort());
       } catch (e) {
-        console.error('Lỗi khi build projectCohortMap:', e);
+        console.error('Lỗi khi build projectCohortMap qua API:', e);
       }
 
       // Nếu chưa chọn project, auto chọn project đầu tiên
@@ -239,7 +270,6 @@ export default function AdminCommentSummaryManager() {
 
     if (createdTo) {
       const toDate = new Date(createdTo);
-      // cho toDate bao gồm cả ngày đó (nếu cần, cộng thêm 1 ngày)
       const toDateEnd = new Date(toDate);
       toDateEnd.setDate(toDateEnd.getDate() + 1);
 
@@ -309,11 +339,7 @@ export default function AdminCommentSummaryManager() {
   const totalPages = Math.max(1, Math.ceil(comments.length / PAGE_SIZE));
 
   const paginatedComments = useMemo(
-    () =>
-      comments.slice(
-        (currentPage - 1) * PAGE_SIZE,
-        currentPage * PAGE_SIZE
-      ),
+    () => comments.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE),
     [comments, currentPage]
   );
 
@@ -374,9 +400,7 @@ export default function AdminCommentSummaryManager() {
       PROMPT_TEMPLATES[0];
 
     const project_title = selectedProject?.title || '';
-    const roundObj = roundsOfSelectedProject.find(
-      (r) => r.id === selectedRoundId
-    );
+    const roundObj = roundsOfSelectedProject.find((r) => r.id === selectedRoundId);
     const round_label = roundObj ? `Vòng ${roundObj.round_number}` : '';
 
     const commentTexts = comments.map((c) => c.comment);
@@ -392,10 +416,7 @@ export default function AdminCommentSummaryManager() {
           comments: commentTexts,
           base_prompt: template.text,
           custom_prompt: customPrompt,
-          cohort_label:
-            cohortFilter === 'all'
-              ? null
-              : `Đối tượng: ${cohortFilter}`,
+          cohort_label: cohortFilter === 'all' ? null : `Đối tượng: ${cohortFilter}`,
         }),
       });
 
@@ -408,6 +429,7 @@ export default function AdminCommentSummaryManager() {
         summary?: string;
         error?: string;
       };
+
       if (data.error) {
         setError('GPT báo lỗi: ' + data.error);
       } else {
@@ -430,7 +452,7 @@ export default function AdminCommentSummaryManager() {
     <div className="space-y-6 max-w-full overflow-x-hidden">
       <h1 className="text-xl font-bold mb-2">💬 Tổng hợp ý kiến</h1>
 
-      {/* 1) BỘ LỌC PROJECT (giống style trang phân tích) */}
+      {/* 1) BỘ LỌC PROJECT */}
       <section className="border rounded-lg p-4 bg-gray-50 space-y-3 overflow-hidden">
         <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
           {/* Tìm theo tên Project */}
@@ -455,9 +477,7 @@ export default function AdminCommentSummaryManager() {
             <select
               className="w-full border rounded px-2 py-1 text-sm"
               value={projectStatusFilter}
-              onChange={(e) =>
-                setProjectStatusFilter(e.target.value as 'all' | string)
-              }
+              onChange={(e) => setProjectStatusFilter(e.target.value as 'all' | string)}
             >
               <option value="all">Tất cả</option>
               {projectStatusOptions.map((st) => (
@@ -476,9 +496,7 @@ export default function AdminCommentSummaryManager() {
             <select
               className="w-full border rounded px-2 py-1 text-sm"
               value={cohortFilter}
-              onChange={(e) =>
-                setCohortFilter(e.target.value as 'all' | string)
-              }
+              onChange={(e) => setCohortFilter(e.target.value as 'all' | string)}
             >
               <option value="all">Tất cả</option>
               {cohortOptions.map((c) => (
@@ -487,6 +505,11 @@ export default function AdminCommentSummaryManager() {
                 </option>
               ))}
             </select>
+            {cohortOptions.length === 0 && (
+              <div className="mt-1 text-xs text-gray-500 italic">
+                (Chưa có đối tượng — kiểm tra lại API / RLS / dữ liệu cohort_code)
+              </div>
+            )}
           </div>
 
           {/* Ngày tạo */}
@@ -513,19 +536,12 @@ export default function AdminCommentSummaryManager() {
 
         <div className="flex items-center justify-between text-sm text-gray-600 mt-1">
           <span>
-            Tổng Project: <b>{projects.length}</b> · Sau lọc:{' '}
-            <b>{filteredProjects.length}</b>
+            Tổng Project: <b>{projects.length}</b> · Sau lọc: <b>{filteredProjects.length}</b>
           </span>
           {loadingProjects && (
-            <span className="text-gray-500">
-              Đang tải project / vòng / đối tượng...
-            </span>
+            <span className="text-gray-500">Đang tải project / vòng / đối tượng...</span>
           )}
-          {error && (
-            <span className="text-red-600">
-              {error}
-            </span>
-          )}
+          {error && <span className="text-red-600">{error}</span>}
         </div>
       </section>
 
@@ -545,18 +561,10 @@ export default function AdminCommentSummaryManager() {
                 <tr>
                   <th className="border px-2 py-1 text-center w-10">#</th>
                   <th className="border px-2 py-1 text-left">Tên Project</th>
-                  <th className="border px-2 py-1 text-center w-24">
-                    Trạng thái
-                  </th>
-                  <th className="border px-2 py-1 text-center w-32">
-                    Ngày tạo
-                  </th>
-                  <th className="border px-2 py-1 text-center w-24">
-                    Số vòng
-                  </th>
-                  <th className="border px-2 py-1 text-center w-32">
-                    Số đối tượng
-                  </th>
+                  <th className="border px-2 py-1 text-center w-24">Trạng thái</th>
+                  <th className="border px-2 py-1 text-center w-32">Ngày tạo</th>
+                  <th className="border px-2 py-1 text-center w-24">Số vòng</th>
+                  <th className="border px-2 py-1 text-center w-32">Số đối tượng</th>
                 </tr>
               </thead>
               <tbody>
@@ -568,30 +576,19 @@ export default function AdminCommentSummaryManager() {
                   return (
                     <tr
                       key={p.id}
-                      className={
-                        'cursor-pointer hover:bg-blue-50 ' +
-                        (isSelected ? 'bg-blue-50' : '')
-                      }
+                      className={'cursor-pointer hover:bg-blue-50 ' + (isSelected ? 'bg-blue-50' : '')}
                       onClick={() => handleProjectRowClick(p.id)}
                     >
-                      <td className="border px-2 py-1 text-center align-top">
-                        {idx + 1}
-                      </td>
+                      <td className="border px-2 py-1 text-center align-top">{idx + 1}</td>
                       <td className="border px-2 py-1 align-top">
                         <div className="font-semibold">{p.title}</div>
                       </td>
-                      <td className="border px-2 py-1 text-center align-top">
-                        {p.status}
-                      </td>
+                      <td className="border px-2 py-1 text-center align-top">{p.status}</td>
                       <td className="border px-2 py-1 text-center align-top">
                         {new Date(p.created_at).toLocaleDateString()}
                       </td>
-                      <td className="border px-2 py-1 text-center align-top">
-                        {p.rounds.length}
-                      </td>
-                      <td className="border px-2 py-1 text-center align-top">
-                        {cohortCount}
-                      </td>
+                      <td className="border px-2 py-1 text-center align-top">{p.rounds.length}</td>
+                      <td className="border px-2 py-1 text-center align-top">{cohortCount}</td>
                     </tr>
                   );
                 })}
@@ -607,16 +604,12 @@ export default function AdminCommentSummaryManager() {
               Project đang chọn
             </label>
             <div className="text-sm">
-              {selectedProject
-                ? selectedProject.title
-                : 'Chưa chọn. Hãy click một Project trong bảng.'}
+              {selectedProject ? selectedProject.title : 'Chưa chọn. Hãy click một Project trong bảng.'}
             </div>
           </div>
 
           <div>
-            <label className="block text-sm font-semibold mb-1">
-              Vòng
-            </label>
+            <label className="block text-sm font-semibold mb-1">Vòng</label>
             <select
               className="w-full border rounded px-2 py-1 text-sm"
               value={selectedRoundId}
@@ -636,12 +629,7 @@ export default function AdminCommentSummaryManager() {
             <button
               type="button"
               className="px-4 py-2 rounded-lg bg-blue-600 text-white font-semibold text-sm hover:bg-blue-700 disabled:opacity-50"
-              disabled={
-                !selectedProjectId ||
-                !selectedRoundId ||
-                loadingComments ||
-                loadingProjects
-              }
+              disabled={!selectedProjectId || !selectedRoundId || loadingComments || loadingProjects}
               onClick={handleLoadComments}
             >
               {loadingComments ? 'Đang tải ý kiến…' : 'Tải ý kiến'}
@@ -649,19 +637,13 @@ export default function AdminCommentSummaryManager() {
           </div>
         </div>
 
-        {error && (
-          <div className="text-sm text-red-600 mt-2">
-            {error}
-          </div>
-        )}
+        {error && <div className="text-sm text-red-600 mt-2">{error}</div>}
       </section>
 
       {/* 3) BẢNG Ý KIẾN THÔ */}
       <section className="border rounded-lg p-4 bg-white overflow-hidden">
         <div className="flex items-center justify-between mb-2">
-          <h2 className="font-semibold">
-            Ý kiến thô ({comments.length})
-          </h2>
+          <h2 className="font-semibold">Ý kiến thô ({comments.length})</h2>
           {comments.length > 0 && (
             <div className="text-sm text-gray-500">
               Trang {currentPage}/{totalPages} · {PAGE_SIZE} ý kiến/trang
@@ -671,8 +653,7 @@ export default function AdminCommentSummaryManager() {
 
         {comments.length === 0 ? (
           <div className="text-sm text-gray-500 italic">
-            Chưa có ý kiến. Hãy chọn Project, Vòng, Đối tượng và bấm
-            &quot;Tải ý kiến&quot;.
+            Chưa có ý kiến. Hãy chọn Project, Vòng, Đối tượng và bấm &quot;Tải ý kiến&quot;.
           </div>
         ) : (
           <>
@@ -680,15 +661,9 @@ export default function AdminCommentSummaryManager() {
               <table className="text-sm border-collapse w-full">
                 <thead className="bg-gray-100 sticky top-0 z-10">
                   <tr>
-                    <th className="border px-2 py-1 text-center w-12">
-                      #
-                    </th>
-                    <th className="border px-2 py-1 text-left w-[260px]">
-                      Câu hỏi
-                    </th>
-                    <th className="border px-2 py-1 text-left">
-                      Ý kiến
-                    </th>
+                    <th className="border px-2 py-1 text-center w-12">#</th>
+                    <th className="border px-2 py-1 text-left w-[260px]">Câu hỏi</th>
+                    <th className="border px-2 py-1 text-left">Ý kiến</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -700,9 +675,7 @@ export default function AdminCommentSummaryManager() {
                       <td className="border px-2 py-1 align-top">
                         {truncate(c.item_prompt, 14)}
                       </td>
-                      <td className="border px-2 py-1 align-top">
-                        {c.comment}
-                      </td>
+                      <td className="border px-2 py-1 align-top">{c.comment}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -717,18 +690,14 @@ export default function AdminCommentSummaryManager() {
                 <button
                   className="px-3 py-1 border rounded disabled:opacity-50"
                   disabled={currentPage <= 1}
-                  onClick={() =>
-                    setCurrentPage((p) => Math.max(1, p - 1))
-                  }
+                  onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
                 >
                   ← Trước
                 </button>
                 <button
                   className="px-3 py-1 border rounded disabled:opacity-50"
                   disabled={currentPage >= totalPages}
-                  onClick={() =>
-                    setCurrentPage((p) => Math.min(totalPages, p + 1))
-                  }
+                  onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
                 >
                   Sau →
                 </button>
@@ -740,9 +709,7 @@ export default function AdminCommentSummaryManager() {
 
       {/* 4) KHU VỰC GPT TÓM TẮT */}
       <section className="border rounded-lg p-4 bg-gray-50 space-y-3">
-        <h2 className="font-semibold mb-1">
-          GPT tổng hợp ý kiến
-        </h2>
+        <h2 className="font-semibold mb-1">GPT tổng hợp ý kiến</h2>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
           <div className="md:col-span-1">
@@ -760,9 +727,7 @@ export default function AdminCommentSummaryManager() {
                 </option>
               ))}
             </select>
-            <p className="mt-2 text-xs text-gray-600">
-              {selectedTemplate.text}
-            </p>
+            <p className="mt-2 text-xs text-gray-600">{selectedTemplate.text}</p>
           </div>
 
           <div className="md:col-span-2">
@@ -799,8 +764,7 @@ export default function AdminCommentSummaryManager() {
             </div>
           ) : (
             <div className="text-sm text-gray-500 italic">
-              Chưa có kết quả. Hãy tải ý kiến và bấm &quot;GPT tổng hợp
-              ý kiến&quot;.
+              Chưa có kết quả. Hãy tải ý kiến và bấm &quot;GPT tổng hợp ý kiến&quot;.
             </div>
           )}
         </div>
