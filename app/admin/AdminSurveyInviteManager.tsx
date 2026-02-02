@@ -6,7 +6,13 @@ import { supabase } from '@/lib/supabaseClient';
 
 type Project = { id: string; title: string; status: string };
 type Round = { id: string; project_id: string; round_number: number };
-type Profile = { id: string; email: string; name: string | null; role: string; cohort_code: string | null };
+type Profile = {
+  id: string;
+  email: string;
+  name: string | null;
+  role: string;
+  cohort_code: string | null;
+};
 
 type ProgressRow = {
   user_id: string;
@@ -20,6 +26,8 @@ type ProgressRow = {
   responded_at?: string | null;
   invited_at?: string | null;
 };
+
+type InviteRole = 'core_expert' | 'external_expert';
 
 const INPUT =
   'w-full border rounded-lg px-3 py-2 outline-none focus:border-blue-300 focus:ring-2 focus:ring-blue-200';
@@ -102,6 +110,13 @@ function parseCsvToObjects(text: string): Record<string, string>[] {
   return out;
 }
 
+function normalizeInviteRole(v: any): InviteRole | null {
+  const s = String(v || '').trim();
+  if (s === 'core_expert') return 'core_expert';
+  if (s === 'external_expert') return 'external_expert';
+  return null;
+}
+
 export default function AdminSurveyInviteManager() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [rounds, setRounds] = useState<Round[]>([]);
@@ -110,12 +125,17 @@ export default function AdminSurveyInviteManager() {
   // Bộ lọc & chọn
   const [filterProject, setFilterProject] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
-  const [filterRole, setFilterRole] = useState<'' | 'core_expert' | 'external_expert'>('');
+  const [filterRole, setFilterRole] = useState<'' | InviteRole>('');
   const [filterEmailAge, setFilterEmailAge] = useState<'' | 'never' | 'recent_7' | 'older_7'>('');
   const [filterCohort, setFilterCohort] = useState('');
   const [selectedRoundIds, setSelectedRoundIds] = useState<string[]>([]);
   const [checkedProfiles, setCheckedProfiles] = useState<Record<string, boolean>>({});
   const [q, setQ] = useState('');
+
+  // ✅ NEW: chọn role khi mời
+  const [inviteRoleDefault, setInviteRoleDefault] = useState<InviteRole>('external_expert');
+  // override theo từng profile (chỉ lưu khi user đổi)
+  const [inviteRoleByProfile, setInviteRoleByProfile] = useState<Record<string, InviteRole>>({});
 
   // Pagination for step (3)
   const PAGE_SIZE_PROFILES = 100;
@@ -224,6 +244,7 @@ export default function AdminSurveyInviteManager() {
     const k = q.trim().toLowerCase();
     return profiles.filter((p) => {
       if (filterRole && p.role !== filterRole) return false;
+
       if (filterCohort) {
         const cc = (p.cohort_code || '').trim();
         if (filterCohort === '__NULL__') {
@@ -232,6 +253,7 @@ export default function AdminSurveyInviteManager() {
           if (cc !== filterCohort) return false;
         }
       }
+
       const hit = !k || p.email.toLowerCase().includes(k) || (p.name || '').toLowerCase().includes(k);
       return hit;
     });
@@ -298,6 +320,22 @@ export default function AdminSurveyInviteManager() {
 
   const checkedIds = useMemo(() => Object.keys(checkedProfiles).filter((id) => checkedProfiles[id]), [checkedProfiles]);
 
+  // ✅ NEW: helper lấy role sẽ gán cho 1 profile (override -> default)
+  function getInviteRoleForProfile(profileId: string): InviteRole {
+    return inviteRoleByProfile[profileId] || inviteRoleDefault;
+  }
+
+  // ✅ NEW: áp role default cho TẤT CẢ người đang được check (1 click)
+  function applyDefaultRoleToChecked() {
+    setInviteRoleByProfile((prev) => {
+      const next = { ...prev };
+      checkedIds.forEach((id) => {
+        next[id] = inviteRoleDefault;
+      });
+      return next;
+    });
+  }
+
   // ===== EMAIL STATS (đã gửi email chưa cho các vòng đang chọn) =====
   useEffect(() => {
     if (selectedRoundIds.length === 0 || baseProfiles.length === 0) {
@@ -334,6 +372,7 @@ export default function AdminSurveyInviteManager() {
     try {
       const csvText = await file.text();
       const parsedRows = parseCsvToObjects(csvText);
+
       const rows = parsedRows
         .map((r) => {
           const full_name = String(r['full_name'] ?? r['name'] ?? '').trim();
@@ -342,18 +381,32 @@ export default function AdminSurveyInviteManager() {
           const title = (r['title'] ?? '').trim();
           const phone = (r['phone'] ?? '').trim();
           const cohort_code = String(r['cohort_code'] ?? '').trim();
-          return { full_name, email, org: org || null, title: title || null, phone: phone || null, cohort_code: cohort_code || null};
+
+          // (tuỳ chọn) CSV có thể có cột role = core_expert/external_expert
+          const roleCsv = normalizeInviteRole(r['role']);
+          // roleCsv chỉ dùng để “gợi ý” cho UI mapping, KHÔNG update DB ở đây (update DB sẽ nằm trong invite)
+          return {
+            full_name,
+            email,
+            org: org || null,
+            title: title || null,
+            phone: phone || null,
+            cohort_code: cohort_code || null,
+            roleCsv, // chỉ dùng UI
+          };
         })
         .filter((r) => r.full_name && r.email);
 
       if (rows.length === 0) {
-        throw new Error('Không tìm thấy dòng hợp lệ. Yêu cầu header: full_name,email (có thể kèm org,title,phone).');
+        throw new Error('Không tìm thấy dòng hợp lệ. Yêu cầu header: full_name,email (có thể kèm org,title,phone,cohort_code,role).');
       }
 
       const res = await fetch('/api/experts/bulk-upsert', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ experts: rows }),
+        body: JSON.stringify({
+          experts: rows.map(({ roleCsv, ...rest }) => rest),
+        }),
       });
       const d = await res.json();
       if (d.error) throw new Error(d.error);
@@ -366,6 +419,24 @@ export default function AdminSurveyInviteManager() {
 
       const allProfiles = await fetchAllProfiles();
       setProfiles(allProfiles);
+
+      // Nếu CSV có role, thì gợi ý set override trong UI theo email match
+      // (match theo email sau khi reload profiles)
+      setInviteRoleByProfile((prev) => {
+        const next = { ...prev };
+        // build map email->roleCsv
+        const roleByEmail = new Map<string, InviteRole>();
+        rows.forEach((r) => {
+          if (r.roleCsv) roleByEmail.set(r.email, r.roleCsv);
+        });
+        if (roleByEmail.size === 0) return prev;
+
+        allProfiles.forEach((p) => {
+          const rr = roleByEmail.get(p.email.toLowerCase());
+          if (rr) next[p.id] = rr;
+        });
+        return next;
+      });
     } catch (e: any) {
       setMsg('❌ Lỗi CSV: ' + (e?.message || String(e)));
     } finally {
@@ -409,6 +480,12 @@ export default function AdminSurveyInviteManager() {
     }
     setLoading(true);
     try {
+      // ✅ NEW: gửi mapping role theo profile_ids (chỉ meaningful khi mode=invite)
+      const invite_roles: Record<string, InviteRole> = {};
+      checkedIds.forEach((id) => {
+        invite_roles[id] = getInviteRoleForProfile(id);
+      });
+
       const r = await fetch('/api/invitations/send', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -417,15 +494,24 @@ export default function AdminSurveyInviteManager() {
           round_ids: selectedRoundIds,
           mode,
           email: { subject: emailSubject, html: emailHtml },
+          // ✅ NEW payload
+          invite_roles: mode === 'invite' ? invite_roles : undefined,
+          default_invite_role: mode === 'invite' ? inviteRoleDefault : undefined,
         }),
       });
       const d = await r.json();
       if (d.error) throw new Error(d.error);
+
       const ok = d.results?.filter((x: any) => x.ok).length || 0;
       setMsg(`Đã gửi ${ok}/${d.results?.length || 0} email.`);
+
       setCheckedProfiles({});
       await reloadProgress();
       setEmailReloadTick((t) => t + 1);
+
+      // reload profiles để nhìn thấy role mới (nếu API có update role)
+      const allProfiles = await fetchAllProfiles();
+      setProfiles(allProfiles);
     } catch (e: any) {
       setMsg('❌ Lỗi gửi email: ' + (e?.message || String(e)));
     } finally {
@@ -487,7 +573,7 @@ export default function AdminSurveyInviteManager() {
           }}
         />
         <div className="text-xs text-slate-600">
-          CSV header tối thiểu: <code>full_name,email</code> (có thể kèm <code>org,title,phone,cohort_code</code>).
+          CSV header tối thiểu: <code>full_name,email</code> (có thể kèm <code>org,title,phone,cohort_code,role</code>).
         </div>
       </div>
 
@@ -535,6 +621,7 @@ export default function AdminSurveyInviteManager() {
             value={q}
             onChange={(e) => setQ(e.target.value)}
           />
+
           <select className={INPUT + ' md:w-56'} value={filterRole} onChange={(e) => setFilterRole(e.target.value as any)}>
             <option value="">— Tất cả vai trò —</option>
             <option value="core_expert">Chuyên gia nòng cốt</option>
@@ -546,9 +633,9 @@ export default function AdminSurveyInviteManager() {
             <option value="__NULL__">(Chưa gán đối tượng)</option>
             {cohortOptions.map((c) => (
               <option key={c} value={c}>
-              {c}
+                {c}
               </option>
-              ))}
+            ))}
           </select>
 
           <select
@@ -562,6 +649,29 @@ export default function AdminSurveyInviteManager() {
             <option value="recent_7">Đã gửi trong 7 ngày gần đây</option>
             <option value="older_7">Đã gửi cách đây &gt; 7 ngày</option>
           </select>
+
+          {/* ✅ NEW: role khi mời */}
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-slate-600">Vai trò khi mời:</span>
+            <select
+              className={INPUT + ' md:w-56'}
+              value={inviteRoleDefault}
+              onChange={(e) => setInviteRoleDefault(e.target.value as InviteRole)}
+            >
+              <option value="external_expert">Chuyên gia bên ngoài</option>
+              <option value="core_expert">Chuyên gia nòng cốt</option>
+            </select>
+
+            <button
+              className={BTN2}
+              type="button"
+              onClick={applyDefaultRoleToChecked}
+              disabled={checkedIds.length === 0}
+              title="Gán vai trò mặc định cho toàn bộ người đang được chọn (override)"
+            >
+              Áp role cho người đã chọn
+            </button>
+          </div>
 
           <div className="flex items-center gap-2">
             <button className={BTN2} onClick={selectAllFiltered} type="button">
@@ -611,16 +721,17 @@ export default function AdminSurveyInviteManager() {
               max={totalPages}
               value={page}
               onChange={(e) => setPage(Number(e.target.value) || 1)}
-              />
+            />
           </div>
         </div>
 
         <div className="border rounded max-h-80 overflow-auto">
           {pageItems.map((u) => {
             const lastSent = selectedRoundIds.length ? emailStats[u.id] : null;
+            const inviteRole = getInviteRoleForProfile(u.id);
 
             return (
-              <label key={u.id} className="flex items-center gap-2 px-3 py-2 border-b last:border-b-0">
+              <label key={u.id} className="flex items-start gap-2 px-3 py-2 border-b last:border-b-0">
                 <input
                   type="checkbox"
                   checked={!!checkedProfiles[u.id]}
@@ -630,15 +741,51 @@ export default function AdminSurveyInviteManager() {
                       [u.id]: e.target.checked,
                     }))
                   }
+                  className="mt-1"
                 />
-                <div className="flex flex-col text-sm">
+
+                <div className="flex-1 flex flex-col text-sm">
                   <span>
                     <b>{u.name || u.email}</b>{' '}
                     <span className="text-slate-500">
-                      ({u.email}) – <i>{u.role}</i>
+                      ({u.email}) – <i>role hiện tại: {u.role}</i>
                       {u.cohort_code ? <> – <b>{u.cohort_code}</b></> : null}
                     </span>
                   </span>
+
+                  {/* ✅ NEW: chọn role khi mời cho từng người */}
+                  <div className="mt-1 flex flex-wrap items-center gap-2 text-xs">
+                    <span className="text-slate-500">Role sẽ gán khi mời:</span>
+                    <select
+                      className="border rounded px-2 py-1"
+                      value={inviteRole}
+                      onChange={(e) => {
+                        const v = e.target.value as InviteRole;
+                        setInviteRoleByProfile((prev) => ({ ...prev, [u.id]: v }));
+                      }}
+                      disabled={!checkedProfiles[u.id]} // chỉ cho đổi khi đã check
+                      title="Chỉ áp dụng khi bạn bấm Mời (invite). Nhắc (remind) sẽ không đổi role."
+                    >
+                      <option value="external_expert">external_expert</option>
+                      <option value="core_expert">core_expert</option>
+                    </select>
+
+                    {checkedProfiles[u.id] && inviteRoleByProfile[u.id] && (
+                      <button
+                        type="button"
+                        className="text-slate-500 underline"
+                        onClick={() =>
+                          setInviteRoleByProfile((prev) => {
+                            const next = { ...prev };
+                            delete next[u.id];
+                            return next;
+                          })
+                        }
+                      >
+                        bỏ override
+                      </button>
+                    )}
+                  </div>
 
                   {selectedRoundIds.length === 0 ? (
                     <span className="text-xs text-slate-400">Chọn vòng ở bước 2 để xem trạng thái email.</span>
