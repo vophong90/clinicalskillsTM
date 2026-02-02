@@ -1,184 +1,206 @@
-// File: app/api/surveys/progress/route.ts
-import { NextRequest, NextResponse } from 'next/server';
-import { getAdminClient } from '@/lib/supabase-admin';
+import { NextRequest, NextResponse } from "next/server";
+import { getRouteClient } from "@/lib/supabaseServer";
+import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
+type StatusFilter = "all" | "submitted" | "not_submitted";
+
+function pickStatus(x: string | null): StatusFilter {
+  if (x === "submitted" || x === "not_submitted") return x;
+  return "all";
+}
 
 export async function GET(req: NextRequest) {
-  const s = getAdminClient();
-  const url = new URL(req.url);
-  const projectId = url.searchParams.get('project_id');
-  const roundId = url.searchParams.get('round_id');
-  const status = url.searchParams.get('status'); // 'submitted' | 'invited'
+  try {
+    const url = new URL(req.url);
+    const project_id = url.searchParams.get("project_id");
+    const round_id = url.searchParams.get("round_id");
+    const status = pickStatus(url.searchParams.get("status"));
+    const q = (url.searchParams.get("q") || "").trim().toLowerCase();
 
-  const PAGE_SIZE = 1000;
-
-  // =========================
-  // 1) Lấy TẤT CẢ participants bằng phân trang
-  // =========================
-  let participants: { round_id: string; user_id: string; created_at: string }[] = [];
-  let from = 0;
-
-  while (true) {
-    let q = s
-      .from('round_participants')
-      .select('round_id, user_id, created_at')
-      .range(from, from + PAGE_SIZE - 1);
-
-    if (roundId) q = q.eq('round_id', roundId);
-
-    const { data, error } = await q;
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
+    // 1) auth user (để chặn người ngoài)
+    const supabase = await getRouteClient();
+    const { data: auth, error: authErr } = await supabase.auth.getUser();
+    if (authErr || !auth?.user) {
+      return NextResponse.json({ error: "Chưa đăng nhập." }, { status: 401 });
     }
 
-    if (!data || data.length === 0) break;
+    // 2) admin client (bypass RLS để aggregate)
+    const admin = getSupabaseAdmin();
 
-    participants.push(...data);
+    // 3) xác định danh sách round cần xem
+    let roundIds: string[] = [];
 
-    if (data.length < PAGE_SIZE) break;
-    from += PAGE_SIZE;
-  }
+    if (round_id) {
+      roundIds = [round_id];
+    } else if (project_id) {
+      const { data: rds, error: rErr } = await admin
+        .from("rounds")
+        .select("id")
+        .eq("project_id", project_id);
 
-  if (!participants.length) {
-    // Không có ai trong round_participants
-    return NextResponse.json({ items: [] });
-  }
-
-  // =========================
-  // 1b) Lọc theo project nếu có projectId
-  // =========================
-  if (projectId) {
-    const { data: roundsByProject, error: eRounds } = await s
-      .from('rounds')
-      .select('id')
-      .eq('project_id', projectId);
-
-    if (eRounds) {
-      return NextResponse.json({ error: eRounds.message }, { status: 500 });
+      if (rErr) throw rErr;
+      roundIds = (rds || []).map((x: any) => x.id);
+    } else {
+      return NextResponse.json(
+        { items: [], note: "Thiếu project_id hoặc round_id." },
+        { status: 200 }
+      );
     }
 
-    const okRounds = new Set((roundsByProject || []).map((r) => r.id));
-    participants = participants.filter((p) => okRounds.has(p.round_id));
-  }
-
-  const roundIds = Array.from(new Set(participants.map((x) => x.round_id)));
-
-  if (!roundIds.length) {
-    // Có participants nhưng sau khi lọc theo project thì không còn gì
-    return NextResponse.json({ items: [] });
-  }
-
-  // =========================
-  // 2) Map thông tin rounds, projects, profiles
-  // =========================
-
-  // Rounds của các round_id liên quan
-  const { data: rounds2, error: eR2 } = await s
-    .from('rounds')
-    .select('id, project_id, round_number')
-    .in('id', roundIds);
-
-  if (eR2) {
-    return NextResponse.json({ error: eR2.message }, { status: 500 });
-  }
-
-  // Toàn bộ projects (số lượng thường ít)
-  const { data: projects, error: ePrj } = await s.from('projects').select('id, title');
-  if (ePrj) {
-    return NextResponse.json({ error: ePrj.message }, { status: 500 });
-  }
-
-  // Profiles – load toàn bộ theo phân trang, tránh limit 1000
-  let allProfiles: { id: string; email: string | null; name: string | null }[] = [];
-  let fromProf = 0;
-
-  while (true) {
-    const { data, error } = await s
-      .from('profiles')
-      .select('id, email, name')
-      .range(fromProf, fromProf + PAGE_SIZE - 1);
-
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
+    if (roundIds.length === 0) {
+      return NextResponse.json({ items: [] }, { status: 200 });
     }
 
-    if (!data || data.length === 0) break;
+    // 4) lấy meta round -> project + round_number
+    const { data: roundMeta, error: rmErr } = await admin
+      .from("rounds")
+      .select("id, project_id, round_number")
+      .in("id", roundIds);
 
-    allProfiles = allProfiles.concat((data as any[]) || []);
-    if (data.length < PAGE_SIZE) break;
+    if (rmErr) throw rmErr;
 
-    fromProf += PAGE_SIZE;
-  }
+    const roundMetaMap = new Map<string, { project_id: string; round_number: number }>();
+    (roundMeta || []).forEach((r: any) => {
+      roundMetaMap.set(r.id, { project_id: r.project_id, round_number: r.round_number });
+    });
 
-  const rmap = new Map((rounds2 || []).map((r) => [r.id, r] as const));
-  const pmap = new Map((projects || []).map((p) => [p.id, p] as const));
-  const umap = new Map((allProfiles || []).map((u) => [u.id, u] as const));
+    const projectIds = Array.from(new Set((roundMeta || []).map((r: any) => r.project_id)));
 
-  // =========================
-  // 3) Lấy TẤT CẢ responses is_submitted=true bằng phân trang
-  // =========================
-  let subs: { user_id: string; round_id: string; updated_at: string }[] = [];
-  let fromResp = 0;
+    // 5) project titles
+    const { data: projData, error: pErr } = await admin
+      .from("projects")
+      .select("id, title")
+      .in("id", projectIds);
 
-  while (true) {
-    const { data, error } = await s
-      .from('responses')
-      .select('user_id, round_id, updated_at')
-      .eq('is_submitted', true)
-      .in('round_id', roundIds)
-      .range(fromResp, fromResp + PAGE_SIZE - 1);
+    if (pErr) throw pErr;
 
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
-    }
+    const projTitleMap = new Map<string, string>();
+    (projData || []).forEach((p: any) => projTitleMap.set(p.id, p.title));
 
-    if (!data || data.length === 0) break;
+    // 6) total items per round (để biết “hoàn tất”)
+    const { data: itemsData, error: itErr } = await admin
+      .from("items")
+      .select("id, round_id")
+      .in("round_id", roundIds);
 
-    subs.push(...data);
+    if (itErr) throw itErr;
 
-    if (data.length < PAGE_SIZE) break;
-    fromResp += PAGE_SIZE;
-  }
+    const totalItemsByRound = new Map<string, number>();
+    (itemsData || []).forEach((it: any) => {
+      const rid = it.round_id;
+      totalItemsByRound.set(rid, (totalItemsByRound.get(rid) || 0) + 1);
+    });
 
-  // =========================
-  // 4) Xử lý set submitted / thời gian
-  // =========================
-  const submittedSet = new Set((subs || []).map((x) => `${x.user_id}:${x.round_id}`));
-  const submittedTime = new Map<string, string>();
+    // 7) participants (ai được mời trong round)
+    const { data: parts, error: rpErr } = await admin
+      .from("round_participants")
+      .select("round_id, user_id")
+      .in("round_id", roundIds);
 
-  (subs || []).forEach((x) => {
-    const k = `${x.user_id}:${x.round_id}`;
-    const prev = submittedTime.get(k);
-    if (!prev || new Date(x.updated_at).getTime() > new Date(prev).getTime()) {
-      submittedTime.set(k, x.updated_at);
-    }
-  });
+    if (rpErr) throw rpErr;
 
-  // =========================
-  // 5) Build rows kết quả
-  // =========================
-  const rows = participants
-    .map((pa) => {
-      const r = rmap.get(pa.round_id);
-      const prj = r ? pmap.get(r.project_id) : undefined;
-      const u = umap.get(pa.user_id);
-      const k = `${pa.user_id}:${pa.round_id}`;
-      const submitted = submittedSet.has(k);
-      const st: 'submitted' | 'invited' = submitted ? 'submitted' : 'invited';
+    // 8) load profiles cho participants
+    const userIds = Array.from(new Set((parts || []).map((x: any) => x.user_id)));
+    const { data: profs, error: prErr } = await admin
+      .from("profiles")
+      .select("id, name, email")
+      .in("id", userIds);
+
+    if (prErr) throw prErr;
+
+    const profMap = new Map<string, { name: string; email: string }>();
+    (profs || []).forEach((u: any) => profMap.set(u.id, { name: u.name || "", email: u.email || "" }));
+
+    // 9) responses: aggregate submitted count + last updated
+    // NOTE: responses unique (round_id, item_id, user_id)
+    const { data: resp, error: rsErr } = await admin
+      .from("responses")
+      .select("round_id, user_id, is_submitted, updated_at")
+      .in("round_id", roundIds)
+      .in("user_id", userIds);
+
+    if (rsErr) throw rsErr;
+
+    type Agg = { submitted_items: number; last_updated_at: string | null };
+    const agg = new Map<string, Agg>(); // key = `${round_id}::${user_id}`
+
+    (resp || []).forEach((r: any) => {
+      const key = `${r.round_id}::${r.user_id}`;
+      const cur = agg.get(key) || { submitted_items: 0, last_updated_at: null };
+
+      if (r.is_submitted) cur.submitted_items += 1;
+
+      const t = r.updated_at ? new Date(r.updated_at).toISOString() : null;
+      if (t) {
+        if (!cur.last_updated_at) cur.last_updated_at = t;
+        else if (new Date(t).getTime() > new Date(cur.last_updated_at).getTime()) cur.last_updated_at = t;
+      }
+
+      agg.set(key, cur);
+    });
+
+    // 10) build rows
+    const items = (parts || []).map((p: any) => {
+      const rid = p.round_id as string;
+      const uid = p.user_id as string;
+
+      const meta = roundMetaMap.get(rid);
+      const total = totalItemsByRound.get(rid) || 0;
+
+      const a = agg.get(`${rid}::${uid}`) || { submitted_items: 0, last_updated_at: null };
+      const done = total > 0 && a.submitted_items >= total;
+
+      const u = profMap.get(uid) || { name: "", email: "" };
+      const projectId = meta?.project_id || "";
+      const projectTitle = projTitleMap.get(projectId) || "";
 
       return {
-        user_id: pa.user_id,
-        user_name: u?.name || u?.email || '',
-        email: u?.email || '',
-        project_id: prj?.id || '',
-        project_title: prj?.title || '',
-        round_id: pa.round_id,
-        round_label: r ? `V${r.round_number}` : '',
-        status: st,
-        responded_at: submitted ? submittedTime.get(k) || null : null,
-        invited_at: pa.created_at,
+        user_id: uid,
+        user_name: u.name,
+        email: u.email,
+        project_id: projectId,
+        project_title: projectTitle,
+        round_id: rid,
+        round_number: meta?.round_number || 0,
+        is_submitted: done,
+        updated_at: a.last_updated_at,
+        // bonus for UI
+        submitted_items: a.submitted_items,
+        total_items: total,
       };
-    })
-    .filter((row) => !status || row.status === status);
+    });
 
-  return NextResponse.json({ items: rows });
+    // 11) server-side filter q/status
+    let out = items;
+
+    if (q) {
+      out = out.filter((x: any) => {
+        return (
+          (x.user_name || "").toLowerCase().includes(q) ||
+          (x.email || "").toLowerCase().includes(q) ||
+          (x.project_title || "").toLowerCase().includes(q)
+        );
+      });
+    }
+
+    if (status === "submitted") out = out.filter((x: any) => !!x.is_submitted);
+    if (status === "not_submitted") out = out.filter((x: any) => !x.is_submitted);
+
+    // sort: round desc then name
+    out.sort((a: any, b: any) => {
+      if ((b.round_number || 0) !== (a.round_number || 0)) return (b.round_number || 0) - (a.round_number || 0);
+      return (a.user_name || a.email || "").localeCompare(b.user_name || b.email || "");
+    });
+
+    return NextResponse.json({ items: out }, { status: 200 });
+  } catch (e: any) {
+    console.error(e);
+    return NextResponse.json(
+      { error: e?.message || String(e) },
+      { status: 500 }
+    );
+  }
 }
