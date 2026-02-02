@@ -28,24 +28,30 @@ const ROLE_OPTIONS: { value: AppRole; label: string }[] = [
 ];
 
 const UI = {
-  page: 'space-y-6',
+  page: 'space-y-5',
   header: 'flex items-start justify-between gap-3',
-  h1: 'text-2xl font-bold',
+  h1: 'text-xl font-bold',
   muted: 'text-sm text-slate-500',
   card: 'border rounded-xl bg-white p-4 shadow-sm',
+
   titleRow: 'flex items-start justify-between gap-3',
-  title: 'text-lg font-semibold',
+  title: 'text-base font-semibold',
   badge: 'text-xs px-2 py-1 rounded bg-slate-100 text-slate-700',
+
+  // smaller controls
+  label: 'block text-xs font-semibold text-slate-700 mb-1',
   input:
-    'w-full border rounded-lg px-3 py-2 outline-none focus:border-blue-300 focus:ring-2 focus:ring-blue-200',
+    'w-full border rounded-lg px-3 py-1.5 text-sm outline-none focus:border-blue-300 focus:ring-2 focus:ring-blue-200',
   select:
-    'w-full border rounded-lg px-3 py-2 outline-none focus:border-blue-300 focus:ring-2 focus:ring-blue-200 bg-white',
+    'w-full border rounded-lg px-3 py-1.5 text-sm outline-none focus:border-blue-300 focus:ring-2 focus:ring-blue-200 bg-white',
+
   btn:
-    'px-4 py-2 rounded-lg font-semibold bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50',
+    'px-3 py-1.5 rounded-lg text-sm font-semibold bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50',
   btn2:
-    'px-4 py-2 rounded-lg font-semibold border border-slate-300 hover:bg-slate-50 disabled:opacity-50',
+    'px-3 py-1.5 rounded-lg text-sm font-semibold border border-slate-300 hover:bg-slate-50 disabled:opacity-50',
   danger:
-    'px-4 py-2 rounded-lg font-semibold border border-rose-300 text-rose-700 hover:bg-rose-50 disabled:opacity-50',
+    'px-3 py-1.5 rounded-lg text-sm font-semibold border border-rose-300 text-rose-700 hover:bg-rose-50 disabled:opacity-50',
+
   hr: 'border-t',
 };
 
@@ -122,6 +128,10 @@ function parseCsvToObjects(text: string): Record<string, string>[] {
     if (Object.values(obj).some((v) => v !== '')) out.push(obj);
   }
   return out;
+}
+
+function clsx(...xs: (string | false | null | undefined)[]) {
+  return xs.filter(Boolean).join(' ');
 }
 
 export default function AdminSurveyInviteManager() {
@@ -444,7 +454,7 @@ export default function AdminSurveyInviteManager() {
       html += `<div style="margin-top:12px">${ul}</div>`;
     }
 
-    html += `<hr style="margin:24px 0"/><div style="font-size:12px;color:#6b7280">Khoa Y học cổ truyền - Đại học Y Dược Thành phố Hồ Chí Minh.</div>`;
+    html += `<hr style="margin:24px 0"/><div style="font-size:12px;color:#6bi; color:#6b7280">Khoa Y học cổ truyền - Đại học Y Dược Thành phố Hồ Chí Minh.</div>`;
     return html;
   }, [emailHtml, selectedRoundIds, rounds, projects]);
 
@@ -494,23 +504,17 @@ export default function AdminSurveyInviteManager() {
   const selectedRoundCount = selectedRoundIds.length;
   const selectedPeopleCount = checkedIds.length;
 
-  // If assignMode == all, clear per-user overrides for cleanliness (optional)
+  // If assignMode == all, close modal
   useEffect(() => {
-    if (assignMode === 'all') {
-      // giữ map vẫn được, nhưng để UX gọn: khi chuyển về "all" thì đóng modal
-      setOpenRoleModal(false);
-    }
+    if (assignMode === 'all') setOpenRoleModal(false);
   }, [assignMode]);
 
-  // ===== Render =====
   return (
     <div className={UI.page}>
       <div className={UI.header}>
         <div>
           <h1 className={UI.h1}>✉️ Mời khảo sát</h1>
-          <div className={UI.muted}>
-            Luồng: Chọn vòng → Chọn người → Gán role → Soạn email → Gửi.
-          </div>
+          <div className={UI.muted}>Luồng: Chọn vòng → Chọn người → Gán role → Soạn email → Gửi.</div>
         </div>
 
         <div className="flex items-center gap-2">
@@ -523,9 +527,9 @@ export default function AdminSurveyInviteManager() {
         </div>
       </div>
 
-      {msg && <div className="p-3 rounded-lg bg-indigo-50 text-indigo-700">{msg}</div>}
+      {msg && <div className="p-3 rounded-lg bg-indigo-50 text-indigo-700 text-sm">{msg}</div>}
 
-      {/* STEP 1: Rounds */}
+      {/* STEP 1: Rounds (compact list row + scroll) */}
       <div className={UI.card}>
         <div className={UI.titleRow}>
           <div>
@@ -535,33 +539,59 @@ export default function AdminSurveyInviteManager() {
           <div className={UI.badge}>Đã chọn: {selectedRoundCount} vòng</div>
         </div>
 
-        <div className="mt-4 grid md:grid-cols-2 gap-4">
-          {activeProjects.map((p) => (
-            <div key={p.id} className="border rounded-lg p-3">
-              <div className="font-semibold mb-2">{p.title}</div>
-              <div className="flex flex-wrap gap-2">
-                {(roundsByProject[p.id] || []).map((r) => (
-                  <label
-                    key={r.id}
-                    className={`inline-flex items-center gap-2 px-2 py-1 rounded border cursor-pointer ${
-                      selectedRoundIds.includes(r.id) ? 'bg-blue-50 border-blue-300' : 'bg-white'
-                    }`}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={selectedRoundIds.includes(r.id)}
-                      onChange={() => toggleRound(r.id)}
-                    />
-                    V{r.round_number}
-                  </label>
-                ))}
-                {(roundsByProject[p.id] || []).length === 0 && (
-                  <div className="text-slate-400 text-sm">(Chưa có vòng)</div>
-                )}
-              </div>
-            </div>
-          ))}
-          {activeProjects.length === 0 && <div className="text-slate-500">Không có project đang hoạt động.</div>}
+        {/* Scroll container */}
+        <div className="mt-3 border rounded-lg">
+          <div className="max-h-[360px] overflow-y-auto">
+            {activeProjects.map((p) => {
+              const list = roundsByProject[p.id] || [];
+              return (
+                <div
+                  key={p.id}
+                  className="px-3 py-2 border-b last:border-b-0 flex items-center gap-3"
+                >
+                  {/* Left: project title */}
+                  <div className="min-w-0 flex-1">
+                    <div className="text-sm font-semibold truncate" title={p.title}>
+                      {p.title}
+                    </div>
+                  </div>
+
+                  {/* Right: rounds */}
+                  <div className="flex items-center justify-end gap-2 flex-wrap">
+                    {list.length > 0 ? (
+                      list.map((r) => {
+                        const on = selectedRoundIds.includes(r.id);
+                        return (
+                          <label
+                            key={r.id}
+                            className={clsx(
+                              'inline-flex items-center gap-2 rounded-md border px-2 py-1 cursor-pointer select-none text-sm',
+                              on ? 'bg-blue-50 border-blue-300' : 'bg-white hover:bg-slate-50'
+                            )}
+                            title={`V${r.round_number}`}
+                          >
+                            <input
+                              type="checkbox"
+                              className="h-4 w-4"
+                              checked={on}
+                              onChange={() => toggleRound(r.id)}
+                            />
+                            <span className="text-sm">V{r.round_number}</span>
+                          </label>
+                        );
+                      })
+                    ) : (
+                      <div className="text-xs text-slate-400">(Chưa có vòng)</div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+
+            {activeProjects.length === 0 && (
+              <div className="p-3 text-slate-500 text-sm">Không có project đang hoạt động.</div>
+            )}
+          </div>
         </div>
 
         {selectedRoundIds.length > 0 && (
@@ -573,7 +603,7 @@ export default function AdminSurveyInviteManager() {
         )}
       </div>
 
-      {/* STEP 2: Select people */}
+      {/* STEP 2: Select people (compact controls + aligned) */}
       <div className={UI.card}>
         <div className={UI.titleRow}>
           <div>
@@ -583,100 +613,112 @@ export default function AdminSurveyInviteManager() {
           <div className={UI.badge}>Đã chọn: {selectedPeopleCount} người</div>
         </div>
 
-        {/* Filters */}
-        <div className="mt-4 grid grid-cols-1 md:grid-cols-4 gap-3">
-          <div className="md:col-span-2">
-            <label className="block text-sm font-semibold mb-1">Tìm theo tên/email</label>
-            <input className={UI.input} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Nhập từ khoá..." />
+        {/* Filters + Actions (same row, aligned) */}
+        <div className="mt-4 flex flex-col gap-3">
+          <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
+            <div className="md:col-span-4">
+              <label className={UI.label}>Tìm theo tên/email</label>
+              <input className={UI.input} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Nhập từ khoá..." />
+            </div>
+
+            <div className="md:col-span-2">
+              <label className={UI.label}>Role hiện tại</label>
+              <select className={UI.select} value={filterRole} onChange={(e) => setFilterRole(e.target.value as any)}>
+                <option value="all">— Tất cả —</option>
+                {ROLE_OPTIONS.map((r) => (
+                  <option key={r.value} value={r.value}>
+                    {r.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="md:col-span-2">
+              <label className={UI.label}>Đối tượng (cohort)</label>
+              <select className={UI.select} value={filterCohort} onChange={(e) => setFilterCohort(e.target.value)}>
+                <option value="">— Tất cả —</option>
+                <option value="__NULL__">(Chưa gán)</option>
+                {cohortOptions.map((c) => (
+                  <option key={c} value={c}>
+                    {c}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="md:col-span-4">
+              <label className={UI.label}>Lần gửi email (theo vòng đã chọn)</label>
+              <select
+                className={UI.select}
+                value={filterEmailAge}
+                onChange={(e) => setFilterEmailAge(e.target.value as any)}
+                disabled={selectedRoundIds.length === 0}
+              >
+                <option value="">— Không lọc —</option>
+                <option value="never">Chưa từng gửi</option>
+                <option value="recent_7">Trong 7 ngày</option>
+                <option value="older_7">&gt; 7 ngày</option>
+              </select>
+              {selectedRoundIds.length === 0 && (
+                <div className="text-xs text-slate-400 mt-1">Chọn vòng trước để dùng bộ lọc này.</div>
+              )}
+            </div>
+
+            {/* Page actions aligned */}
+            <div className="md:col-span-12 flex flex-wrap items-center justify-between gap-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <button className={UI.btn2} onClick={selectAllPage} type="button">
+                  Chọn trang
+                </button>
+                <button className={UI.btn2} onClick={invertPage} type="button">
+                  Đảo trang
+                </button>
+                <button className={UI.btn2} onClick={clearPage} type="button">
+                  Bỏ chọn trang
+                </button>
+              </div>
+
+              <div className="text-sm text-slate-600">
+                Tổng: <b>{filteredProfiles.length}</b> · Đã chọn: <b>{checkedIds.length}</b>
+              </div>
+            </div>
           </div>
 
-          <div>
-            <label className="block text-sm font-semibold mb-1">Role hiện tại</label>
-            <select className={UI.select} value={filterRole} onChange={(e) => setFilterRole(e.target.value as any)}>
-              <option value="all">— Tất cả —</option>
-              {ROLE_OPTIONS.map((r) => (
-                <option key={r.value} value={r.value}>
-                  {r.label} ({r.value})
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div>
-            <label className="block text-sm font-semibold mb-1">Đối tượng (cohort)</label>
-            <select className={UI.select} value={filterCohort} onChange={(e) => setFilterCohort(e.target.value)}>
-              <option value="">— Tất cả —</option>
-              <option value="__NULL__">(Chưa gán đối tượng)</option>
-              {cohortOptions.map((c) => (
-                <option key={c} value={c}>
-                  {c}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className="md:col-span-2">
-            <label className="block text-sm font-semibold mb-1">Lần gửi email (theo vòng đã chọn)</label>
-            <select
-              className={UI.select}
-              value={filterEmailAge}
-              onChange={(e) => setFilterEmailAge(e.target.value as any)}
-              disabled={selectedRoundIds.length === 0}
+          {/* Pagination (no wrap for go-to) */}
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              className={UI.btn2}
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              disabled={page <= 1}
+              type="button"
             >
-              <option value="">— Không lọc —</option>
-              <option value="never">Chưa từng gửi</option>
-              <option value="recent_7">Đã gửi trong 7 ngày</option>
-              <option value="older_7">Đã gửi &gt; 7 ngày</option>
-            </select>
-            {selectedRoundIds.length === 0 && (
-              <div className="text-xs text-slate-400 mt-1">Chọn vòng trước để dùng bộ lọc này.</div>
-            )}
-          </div>
+              ← Trước
+            </button>
 
-          <div className="md:col-span-2 flex items-end justify-between gap-2">
-            <div className="flex gap-2 flex-wrap">
-              <button className={UI.btn2} onClick={selectAllPage} type="button">
-                Chọn trang
-              </button>
-              <button className={UI.btn2} onClick={invertPage} type="button">
-                Đảo trang
-              </button>
-              <button className={UI.btn2} onClick={clearPage} type="button">
-                Bỏ chọn trang
-              </button>
-            </div>
             <div className="text-sm text-slate-600">
-              Tổng: <b>{filteredProfiles.length}</b> · Đã chọn: <b>{checkedIds.length}</b>
+              Trang <b>{page}</b> / {totalPages}
             </div>
-          </div>
-        </div>
 
-        {/* Pagination */}
-        <div className="mt-3 flex items-center gap-2">
-          <button className={UI.btn2} onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page <= 1} type="button">
-            ← Trước
-          </button>
-          <div className="text-sm text-slate-600">
-            Trang <b>{page}</b> / {totalPages}
-          </div>
-          <button
-            className={UI.btn2}
-            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-            disabled={page >= totalPages}
-            type="button"
-          >
-            Sau →
-          </button>
-          <div className="ml-auto flex items-center gap-2">
-            <span className="text-sm text-slate-500">Đi tới:</span>
-            <input
-              className={UI.input + ' w-24'}
-              type="number"
-              min={1}
-              max={totalPages}
-              value={page}
-              onChange={(e) => setPage(Number(e.target.value) || 1)}
-            />
+            <button
+              className={UI.btn2}
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              disabled={page >= totalPages}
+              type="button"
+            >
+              Sau →
+            </button>
+
+            <div className="ml-auto flex items-center gap-2 whitespace-nowrap">
+              <span className="text-sm text-slate-500">Đi tới:</span>
+              <input
+                className={clsx(UI.input, 'w-24')}
+                type="number"
+                min={1}
+                max={totalPages}
+                value={page}
+                onChange={(e) => setPage(Number(e.target.value) || 1)}
+              />
+            </div>
           </div>
         </div>
 
@@ -687,10 +729,10 @@ export default function AdminSurveyInviteManager() {
             const lastSent = selectedRoundIds.length ? emailStats[u.id] : null;
 
             return (
-              <label key={u.id} className="flex items-start gap-3 px-3 py-3 border-b last:border-b-0">
+              <label key={u.id} className="flex items-start gap-3 px-3 py-2 border-b last:border-b-0">
                 <input
                   type="checkbox"
-                  className="mt-1"
+                  className="mt-1 h-4 w-4"
                   checked={checked}
                   onChange={(e) =>
                     setCheckedProfiles((prev) => ({
@@ -701,10 +743,15 @@ export default function AdminSurveyInviteManager() {
                 />
                 <div className="min-w-0 flex-1">
                   <div className="text-sm">
-                    <b>{u.name || u.email}</b>{' '}
+                    <b className="truncate">{u.name || u.email}</b>{' '}
                     <span className="text-slate-500">
-                      ({u.email}) · role: <i>{u.role}</i>
-                      {u.cohort_code ? <> · đối tượng: <b>{u.cohort_code}</b></> : null}
+                      ({u.email}) · <i>{u.role}</i>
+                      {u.cohort_code ? (
+                        <>
+                          {' '}
+                          · đối tượng: <b>{u.cohort_code}</b>
+                        </>
+                      ) : null}
                     </span>
                   </div>
                   <div className="mt-1 text-xs">
@@ -712,7 +759,7 @@ export default function AdminSurveyInviteManager() {
                       <span className="text-slate-400">Chọn vòng để xem trạng thái gửi email.</span>
                     ) : lastSent ? (
                       <span className="text-emerald-700">
-                        Đã gửi email lần cuối: {new Date(lastSent).toLocaleString()}
+                        Đã gửi lần cuối: {new Date(lastSent).toLocaleString()}
                       </span>
                     ) : (
                       <span className="text-slate-500">Chưa gửi email cho các vòng đã chọn.</span>
@@ -735,8 +782,7 @@ export default function AdminSurveyInviteManager() {
           <div>
             <div className={UI.title}>3) Gán role khi mời</div>
             <div className={UI.muted}>
-              Khi bấm <b>Mời</b>: hệ thống sẽ upsert <code>permissions.role</code> theo role bạn chọn.
-              Khi bấm <b>Nhắc</b>: chỉ gửi email, không đổi role.
+              Khi bấm <b>Mời</b>: upsert <code>permissions.role</code>. Khi bấm <b>Nhắc</b>: chỉ gửi email.
             </div>
           </div>
           <div className={UI.badge}>
@@ -744,18 +790,18 @@ export default function AdminSurveyInviteManager() {
           </div>
         </div>
 
-        <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-3">
           <label className="flex items-start gap-3 border rounded-lg p-3 cursor-pointer">
             <input
               type="radio"
               name="assignMode"
               checked={assignMode === 'all'}
               onChange={() => setAssignMode('all')}
-              className="mt-1"
+              className="mt-1 h-4 w-4"
             />
             <div className="min-w-0">
-              <div className="font-semibold">Gán 1 role cho tất cả người đã chọn</div>
-              <div className="text-sm text-slate-500">Nhanh, gọn — phù hợp đa số trường hợp.</div>
+              <div className="font-semibold text-sm">Gán 1 role cho tất cả người đã chọn</div>
+              <div className="text-xs text-slate-500">Nhanh, gọn.</div>
               <div className="mt-2">
                 <select
                   className={UI.select}
@@ -778,13 +824,11 @@ export default function AdminSurveyInviteManager() {
               name="assignMode"
               checked={assignMode === 'per_user'}
               onChange={() => setAssignMode('per_user')}
-              className="mt-1"
+              className="mt-1 h-4 w-4"
             />
             <div className="min-w-0">
-              <div className="font-semibold">Gán role riêng cho từng người</div>
-              <div className="text-sm text-slate-500">
-                Mở bảng gán role cho <b>những người đã tick</b>.
-              </div>
+              <div className="font-semibold text-sm">Gán role riêng cho từng người</div>
+              <div className="text-xs text-slate-500">Áp dụng cho những người đã tick.</div>
               <div className="mt-2 flex gap-2 flex-wrap">
                 <button
                   className={UI.btn2}
@@ -793,7 +837,7 @@ export default function AdminSurveyInviteManager() {
                   disabled={checkedIds.length === 0}
                   title={checkedIds.length === 0 ? 'Chọn người trước' : ''}
                 >
-                  Mở bảng gán role ({checkedIds.length})
+                  Mở bảng ({checkedIds.length})
                 </button>
 
                 <button
@@ -806,7 +850,7 @@ export default function AdminSurveyInviteManager() {
                 </button>
               </div>
               <div className="mt-2 text-xs text-slate-500">
-                Nếu một người không có override → dùng role mặc định: <b>{roleLabel(defaultInviteRole)}</b>.
+                Không override → dùng mặc định: <b>{roleLabel(defaultInviteRole)}</b>.
               </div>
             </div>
           </label>
@@ -819,22 +863,14 @@ export default function AdminSurveyInviteManager() {
           <div>
             <div className={UI.title}>4) Email & gửi</div>
             <div className={UI.muted}>
-              Checklist: chọn vòng ({selectedRoundCount}) · chọn người ({selectedPeopleCount}) · có subject/body.
+              Checklist: vòng ({selectedRoundCount}) · người ({selectedPeopleCount}) · có subject/body.
             </div>
           </div>
           <div className="flex gap-2">
-            <button
-              className={emailTab === 'edit' ? UI.btn2 : UI.btn2}
-              type="button"
-              onClick={() => setEmailTab('edit')}
-            >
+            <button className={UI.btn2} type="button" onClick={() => setEmailTab('edit')}>
               Soạn
             </button>
-            <button
-              className={emailTab === 'preview' ? UI.btn2 : UI.btn2}
-              type="button"
-              onClick={() => setEmailTab('preview')}
-            >
+            <button className={UI.btn2} type="button" onClick={() => setEmailTab('preview')}>
               Preview
             </button>
           </div>
@@ -844,12 +880,12 @@ export default function AdminSurveyInviteManager() {
           {emailTab === 'edit' ? (
             <div className="space-y-3">
               <div>
-                <label className="block text-sm font-semibold mb-1">Tiêu đề</label>
+                <label className={UI.label}>Tiêu đề</label>
                 <input className={UI.input} value={emailSubject} onChange={(e) => setEmailSubject(e.target.value)} />
               </div>
 
               <div>
-                <label className="block text-sm font-semibold mb-1">
+                <label className={UI.label}>
                   Nội dung HTML{' '}
                   <span className="text-xs font-normal text-slate-500">
                     (biến: <code>{'{{full_name}}'}</code>, <code>{'{{email}}'}</code>, <code>{'{{project_list}}'}</code>,{' '}
@@ -857,7 +893,7 @@ export default function AdminSurveyInviteManager() {
                   </span>
                 </label>
                 <textarea
-                  className={UI.input + ' h-56 font-mono text-sm'}
+                  className={clsx(UI.input, 'h-56 font-mono text-xs')}
                   value={emailHtml}
                   onChange={(e) => setEmailHtml(e.target.value)}
                 />
@@ -878,7 +914,7 @@ export default function AdminSurveyInviteManager() {
             Nhắc (chỉ gửi)
           </button>
           <div className="text-sm text-slate-500">
-            Role sẽ gán theo: {assignMode === 'all' ? 'mặc định cho tất cả' : 'override theo từng người (nếu có)'}.
+            Role: {assignMode === 'all' ? 'mặc định cho tất cả' : 'override theo từng người (nếu có)'}.
           </div>
         </div>
       </div>
@@ -889,7 +925,7 @@ export default function AdminSurveyInviteManager() {
           <div className="w-full max-w-xl rounded-xl bg-white shadow-lg">
             <div className="p-4 border-b flex items-start justify-between gap-3">
               <div>
-                <div className="text-lg font-semibold">Import danh bạ từ CSV</div>
+                <div className="text-base font-semibold">Import danh bạ từ CSV</div>
                 <div className="text-sm text-slate-500">
                   Header tối thiểu: <code>full_name,email</code> (có thể kèm <code>org,title,phone,cohort_code</code>)
                 </div>
@@ -929,9 +965,9 @@ export default function AdminSurveyInviteManager() {
           <div className="w-full max-w-3xl rounded-xl bg-white shadow-lg">
             <div className="p-4 border-b flex items-start justify-between gap-3">
               <div>
-                <div className="text-lg font-semibold">Gán role cho từng người đã chọn</div>
+                <div className="text-base font-semibold">Gán role cho từng người đã chọn</div>
                 <div className="text-sm text-slate-500">
-                  Nếu không chọn override → dùng role mặc định: <b>{defaultInviteRole}</b>
+                  Không chọn override → dùng role mặc định: <b>{defaultInviteRole}</b>
                 </div>
               </div>
               <div className="flex gap-2">
@@ -945,7 +981,7 @@ export default function AdminSurveyInviteManager() {
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="text-sm text-slate-600">Apply to all:</span>
                 <select
-                  className={UI.select + ' w-64'}
+                  className={clsx(UI.select, 'w-64')}
                   value={defaultInviteRole}
                   onChange={(e) => setDefaultInviteRole(e.target.value as AppRole)}
                 >
@@ -988,11 +1024,16 @@ export default function AdminSurveyInviteManager() {
                         </div>
                         <div className="text-xs text-slate-500">
                           role hiện tại: <i>{u.role}</i>
-                          {u.cohort_code ? <> · đối tượng: <b>{u.cohort_code}</b></> : null}
+                          {u.cohort_code ? (
+                            <>
+                              {' '}
+                              · đối tượng: <b>{u.cohort_code}</b>
+                            </>
+                          ) : null}
                         </div>
                       </div>
 
-                      <div className="w-72">
+                      <div className="w-64">
                         <select
                           className={UI.select}
                           value={override || defaultInviteRole}
@@ -1026,7 +1067,7 @@ export default function AdminSurveyInviteManager() {
                         }
                         disabled={!inviteRoleMap[pid]}
                       >
-                        Bỏ override
+                        Bỏ
                       </button>
                     </div>
                   );
