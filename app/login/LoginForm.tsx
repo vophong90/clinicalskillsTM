@@ -69,7 +69,7 @@ export default function LoginForm() {
           />
           {/* Title */}
           <h1 className="text-2xl font-extrabold text-green-700 text-center">
-            Clinical Skills Delphi
+            TradMed Delphi System
           </h1>
           <div className="text-base text-gray-500 text-center">
             Đăng nhập để tham gia khảo sát
@@ -134,7 +134,7 @@ export default function LoginForm() {
         </div>
       </div>
       <footer className="w-full text-center text-xs text-gray-400 py-3 absolute bottom-0 left-0">
-        © {new Date().getFullYear()} Đội ngũ Clinical Delphi
+        © {new Date().getFullYear()} Đội ngũ TradMed Delphi
       </footer>
     </div>
   );
