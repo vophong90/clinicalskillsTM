@@ -3,7 +3,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Clinical Skills Delphi",
+  title: "TradMed Delphi System",
   description: "MVP khảo sát kỹ năng lâm sàng",
   icons: {
     icon: [
